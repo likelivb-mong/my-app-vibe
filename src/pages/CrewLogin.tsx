@@ -11,6 +11,17 @@ const MASTER_ADMINS = [
 function findCrew(phone: string, pin: string) {
   if (typeof localStorage === "undefined") return null;
 
+  // 🧪 [추가] 테스트용 크루 계정 설정 (0101234 / 1234)
+  if (phone === "0101234" && pin === "1234") {
+    return { 
+      name: "테스트 크루", 
+      phone: "0101234", 
+      pin: "1234", 
+      status: 'active',
+      branch: '테스트 지점' 
+    };
+  }
+
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i);
     if (key && key.startsWith("crew_pin_")) {
@@ -81,12 +92,12 @@ export default function CrewLogin() {
         localStorage.removeItem("auto_login_user");
       }
 
-      alert("관리자 모드로 접속합니다. 🛠️");
+      // 안내창 없이 바로 이동
       window.location.hash = "main-dashboard"; 
       return;
     }
 
-    // 👤 2. 일반 크루 확인
+    // 👤 2. 일반 크루 확인 (테스트 계정 포함)
     const crew = findCrew(cleanPhone, inputPin);
 
     if (crew) {
@@ -111,7 +122,6 @@ export default function CrewLogin() {
   };
 
   const handlePinInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    // 대문자로 자동 변환 (선택 사항, 필요 없으면 toUpperCase 제거)
     setPin(e.target.value.toUpperCase());
     if(error) setError("");
   };
@@ -170,7 +180,6 @@ export default function CrewLogin() {
 
             <div>
                 <label style={labelStyle}>PIN 코드</label>
-                {/* 👇 여기 type="text"로 변경하여 글자가 보이게 함 */}
                 <input
                     type="text" 
                     value={pin}
@@ -258,7 +267,7 @@ export default function CrewLogin() {
 }
 
 // ============================================================================
-// Styles
+// Styles (기존과 동일)
 // ============================================================================
 
 const container: React.CSSProperties = {
@@ -313,7 +322,6 @@ const linkBtn: React.CSSProperties = {
   background: "none", border: "none", color: "#888", fontSize: "13px", cursor: "pointer", transition: "color 0.2s"
 };
 
-// Modal Styles
 const modalOverlay: React.CSSProperties = {
     position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(5px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 2000
 };

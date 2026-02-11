@@ -9,7 +9,9 @@ interface MainDashboardProps {
 
 const MainDashboard: React.FC<MainDashboardProps> = ({ onLogout }) => {
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [viewportWidth, setViewportWidth] = useState<number>(window.innerWidth);
   const [workingCrews, setWorkingCrews] = useState<any[]>([]);
+  const [attendanceLogs, setAttendanceLogs] = useState<any[]>([]);
   const [allCrews, setAllCrews] = useState<any[]>([]); 
   const [selectedBranchCal, setSelectedBranchCal] = useState<string | null>(null);
   const [selectedCrewDetail, setSelectedCrewDetail] = useState<any | null>(null);
@@ -24,14 +26,43 @@ const MainDashboard: React.FC<MainDashboardProps> = ({ onLogout }) => {
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     const syncData = () => {
-      const workData = JSON.parse(localStorage.getItem('working_crews') || '{}');
-      setWorkingCrews(Object.values(workData));
-      
       const allKeys = Object.keys(localStorage);
       const loadedCrews = allKeys
         .filter(k => k.startsWith('crew_pin_'))
         .map(k => JSON.parse(localStorage.getItem(k) || '{}'));
       setAllCrews(loadedCrews);
+
+      const workData = JSON.parse(localStorage.getItem('working_crews') || '{}');
+      const activeRows = loadedCrews
+        .map((crew: any) => {
+          const phone = crew?.phone;
+          if (!phone) return null;
+          const statusRaw = localStorage.getItem(`work_status_${phone}`);
+          if (!statusRaw) return null;
+          try {
+            const status = JSON.parse(statusRaw);
+            if (!status?.working) return null;
+            const work = workData[crew.pin] || {};
+            const ts = Number(status.start) || Number(work.timestamp) || Date.now();
+            return {
+              name: crew.name,
+              pin: crew.pin,
+              branchCode: crew.branchCode,
+              startTime: work.startTime || new Date(ts).toLocaleTimeString('ko-KR', { hour12: false }),
+              timestamp: ts,
+              isUnscheduled: !!(status.isUnscheduled ?? work.isUnscheduled),
+              isLate: !!(status.isLate ?? work.isLate),
+              isNoShowLate: !!(status.isNoShowLate ?? work.isNoShowLate),
+              isSub: !!work.isSub,
+              isActive: true
+            };
+          } catch (_) {
+            return null;
+          }
+        })
+        .filter(Boolean);
+      setWorkingCrews(activeRows as any[]);
+      setAttendanceLogs(JSON.parse(localStorage.getItem('attendance_logs') || '[]'));
 
       const profileReqs = JSON.parse(localStorage.getItem('crew_edit_requests') || '[]');
       const logReqs = JSON.parse(localStorage.getItem('log_edit_requests') || '[]');
@@ -52,12 +83,26 @@ const MainDashboard: React.FC<MainDashboardProps> = ({ onLogout }) => {
     return () => { clearInterval(timer); clearInterval(interval); };
   }, []);
 
+  useEffect(() => {
+    const onResize = () => setViewportWidth(window.innerWidth);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
   const getWorkerStatusBadges = (worker: any) => {
     const badges = [];
     if (worker.isSub) badges.push({ text: '대타', color: '#a855f7' }); 
     if (worker.isUnscheduled) badges.push({ text: '스케줄외', color: '#3b82f6' }); 
+    if (worker.isNoShowLate) badges.push({ text: '무단지각', color: '#f97316' });
     if (worker.isLate) badges.push({ text: '지각', color: '#ef4444' }); 
     return badges;
+  };
+
+  const getMobilePriorityNameColor = (worker: any, fallback: string) => {
+    // 모바일 폭에서는 뱃지 대신 이름 색으로 상태 우선순위를 빠르게 인지
+    if (worker.isLate) return '#ef4444';
+    if (worker.isUnscheduled) return '#3b82f6';
+    return fallback;
   };
 
   const getElapsedTime = (timestamp: number) => {
@@ -66,6 +111,122 @@ const MainDashboard: React.FC<MainDashboardProps> = ({ onLogout }) => {
     const m = Math.floor((diff % 3600000) / 60000);
     return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
   };
+
+  const formatHM = (value?: string) => {
+    if (!value) return '--:--';
+    const nums = String(value).match(/\d+/g);
+    if (!nums || nums.length < 2) return '--:--';
+    return `${String(nums[0]).padStart(2, '0')}:${String(nums[1]).padStart(2, '0')}`;
+  };
+
+  const getTodayPlannedShift = (crew: any) => {
+    const now = new Date();
+    const todayStr = now.toLocaleDateString('en-CA');
+    const dayOfWeek = now.getDay();
+    const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+    const sameDayOneOffs = oneOffShifts
+      .filter(
+        (s: any) =>
+          s?.date === todayStr &&
+          s?.crewName === crew?.name &&
+          s?.branchCode === crew?.branchCode
+      )
+      .sort((a: any, b: any) => (Number(b.id) || 0) - (Number(a.id) || 0));
+
+    const hasOff = sameDayOneOffs.some((s: any) => s?.type === 'OFF');
+    if (hasOff) return null;
+
+    const oneOff = sameDayOneOffs.find((s: any) => s?.type !== 'OFF');
+    if (oneOff?.startTime && oneOff?.endTime) {
+      return { startTime: oneOff.startTime, endTime: oneOff.endTime };
+    }
+
+    const fixedByMonth = crew?.fixedSchedules?.[monthKey]?.[dayOfWeek];
+    const fixedLegacy = crew?.fixedSchedules?.[dayOfWeek];
+    const fixed = fixedByMonth || fixedLegacy;
+    if (fixed?.startTime && fixed?.endTime) {
+      return { startTime: fixed.startTime, endTime: fixed.endTime };
+    }
+
+    return null;
+  };
+
+  const getBranchDailyRows = (branchCode: string) => {
+    const todayStr = new Date().toLocaleDateString('en-CA');
+    const active = workingCrews
+      .filter((c: any) => c.branchCode === branchCode)
+      .map((c: any) => ({ ...c, isActive: true, statusType: 'active', sortTs: Number(c.timestamp) || 0 }));
+
+    const finished = attendanceLogs
+      .filter((l: any) => l.branchCode === branchCode && l.type === 'OUT' && l.date === todayStr)
+      .map((l: any) => {
+        const ts = new Date(`${l.date}T${String(l.startTime || '00:00:00')}`).getTime();
+        return {
+          name: l.userName,
+          pin: l.userPin,
+          branchCode: l.branchCode,
+          startTime: l.startTime,
+          endTime: l.endTime,
+          totalWorkTime: l.totalWorkTime,
+          isLate: !!l.isLate,
+          isUnscheduled: !!l.isUnscheduled,
+          isSub: !!l.isSub,
+          isActive: false,
+          statusType: 'finished',
+          sortTs: Number(l.id) || ts || 0
+        };
+      });
+
+    const planned = allCrews
+      .filter((crew: any) => crew?.branchCode === branchCode)
+      .map((crew: any) => {
+        const schedule = getTodayPlannedShift(crew);
+        if (!schedule) return null;
+        const ts = new Date(`${todayStr}T${String(schedule.startTime || '00:00:00')}`).getTime();
+        return {
+          name: crew.name,
+          pin: crew.pin,
+          branchCode: crew.branchCode,
+          startTime: schedule.startTime,
+          endTime: schedule.endTime,
+          isActive: false,
+          statusType: 'scheduled',
+          sortTs: ts || 0
+        };
+      })
+      .filter(Boolean);
+
+    // 같은 근무자 중 active가 있으면 active를 우선 표시
+    const mergedByPin = new Map<string, any>();
+    const statusPriority: Record<string, number> = { scheduled: 1, finished: 2, active: 3 };
+    [...planned, ...finished, ...active].forEach((row: any) => {
+      const key = String(row.pin || row.name);
+      const prev = mergedByPin.get(key);
+      if (!prev) {
+        mergedByPin.set(key, row);
+        return;
+      }
+      const prevPriority = statusPriority[prev.statusType] || 0;
+      const nextPriority = statusPriority[row.statusType] || 0;
+      if (nextPriority > prevPriority || (nextPriority === prevPriority && row.sortTs > prev.sortTs)) {
+        mergedByPin.set(key, row);
+      }
+    });
+
+    const toStartMinutes = (time: string) => {
+      const [h, m] = String(time || "99:99").split(":").map(Number);
+      return (Number.isFinite(h) ? h : 99) * 60 + (Number.isFinite(m) ? m : 99);
+    };
+
+    // 일일 스케줄 기록 내, 출근·예정·퇴근 이름칸 모두 출근 시간(시작 시간) 기준 내림차순 정렬 유지 (늦은 출근 먼저)
+    return Array.from(mergedByPin.values()).sort((a: any, b: any) => {
+      const diff = toStartMinutes(b.startTime) - toStartMinutes(a.startTime);
+      if (diff !== 0) return diff;
+      return String(a.name || "").localeCompare(String(b.name || ""));
+    });
+  };
+
 
   const handleCrewClick = (name: string, code: string) => {
     const crew = allCrews.find((c: any) => c.name === name && c.branchCode === code);
@@ -80,14 +241,29 @@ const MainDashboard: React.FC<MainDashboardProps> = ({ onLogout }) => {
     let list = allLogs.filter((l: any) => l.userPin === selectedCrewDetail.pin && (l.type === 'OUT' || l.type === 'ABSENT'));
     const workingCrews = JSON.parse(localStorage.getItem('working_crews') || '{}');
     const activeShift = workingCrews[selectedCrewDetail.pin];
-    if (activeShift) {
+    const todayStr = new Date().toLocaleDateString('en-CA');
+    const isActuallyWorkingNow = (() => {
+      try {
+        const phone = selectedCrewDetail?.phone;
+        if (!phone) return false;
+        const raw = localStorage.getItem(`work_status_${phone}`);
+        if (!raw) return false;
+        const parsed = JSON.parse(raw);
+        return !!parsed?.working;
+      } catch (_) {
+        return false;
+      }
+    })();
+    if (activeShift && isActuallyWorkingNow) {
       const activeDate = new Date(activeShift.timestamp).toLocaleDateString('en-CA');
-      if (activeDate.startsWith(detailTargetMonth)) {
+      // 과거에 남은 stale 근무중 데이터가 상세 기록을 덮어쓰지 않도록 오늘 데이터만 근무중으로 표시
+      if (activeDate === todayStr && activeDate.startsWith(detailTargetMonth)) {
         list = list.filter((l: any) => l.date !== activeDate);
         list.push({
           id: 'active_now', userPin: selectedCrewDetail.pin, userName: selectedCrewDetail.name, type: 'IN',
           date: activeDate, startTime: activeShift.startTime, endTime: '', totalWorkTime: '00:00:00',
-          isLate: activeShift.isLate, isUnscheduled: activeShift.isUnscheduled, isSub: activeShift.isSub
+          timestamp: Number(activeShift.timestamp) || Date.now(),
+          isLate: activeShift.isLate, isNoShowLate: activeShift.isNoShowLate, isUnscheduled: activeShift.isUnscheduled, isSub: activeShift.isSub
         });
       }
     }
@@ -105,10 +281,10 @@ const MainDashboard: React.FC<MainDashboardProps> = ({ onLogout }) => {
       if (log.type !== 'OUT' || !log.totalWorkTime) return;
       const [h, m] = String(log.totalWorkTime).split(':').map(Number);
       const totalMinutes = (h || 0) * 60 + (m || 0);
-      const holidayRate = holidaysMap[log.date] || 0;
+      const holidayExtraRate = holidaysMap[log.date] || 0;
       const baseRate = selectedCrewDetail.totalHourly || 0;
       tBase += Math.floor(totalMinutes * (baseRate / 60));
-      if (holidayRate > 0) tHoliday += Math.floor(totalMinutes * (Math.max(0, holidayRate - baseRate) / 60));
+      if (holidayExtraRate > 0) tHoliday += Math.floor(totalMinutes * (holidayExtraRate / 60));
       tMinutes += totalMinutes;
     });
     const totalExp = myExpenses.reduce((acc: number, ex: any) => acc + (Number(ex.amount) || 0), 0);
@@ -197,7 +373,7 @@ const MainDashboard: React.FC<MainDashboardProps> = ({ onLogout }) => {
         localStorage.setItem(key, JSON.stringify(crewData));
       }
     } else {
-      // 일회성 스케줄 삭제
+      // 해당 날짜의 등록된 내용만 삭제 (OFF 추가 없음). 일회성·대타·교육 등만 제거 → 고정 스케줄이 있으면 다시 그대로 표시됨
       const updated = oneOffShifts.filter((s: any) => !(s.date === dateStr && s.crewName === worker.name));
       localStorage.setItem('company_one_offs', JSON.stringify(updated));
       setOneOffShifts(updated);
@@ -214,10 +390,10 @@ const MainDashboard: React.FC<MainDashboardProps> = ({ onLogout }) => {
     return c ? c.branchCode : '';
   };
 
-  const openHolidaySettings = (dateStr: string) => {
+  const openHolidaySettings = (dateStr: string, extraPay?: number) => {
     const next = { ...holidays };
     if (next[dateStr]) delete next[dateStr];
-    else next[dateStr] = 1000;
+    else next[dateStr] = Number(extraPay) > 0 ? Number(extraPay) : 1000;
     setHolidays(next);
     localStorage.setItem('company_holidays_map', JSON.stringify(next));
   };
@@ -262,6 +438,71 @@ const MainDashboard: React.FC<MainDashboardProps> = ({ onLogout }) => {
           isSub: false
         };
         localStorage.setItem('working_crews', JSON.stringify(workingCrews));
+
+        // ✅ CrewHome에서 바로 근무 시작 상태로 보이도록 work_status도 함께 세팅
+        const crew = allCrews.find((c: any) => c.pin === req.reqPin);
+        if (crew?.phone) {
+          localStorage.setItem(
+            `work_status_${crew.phone}`,
+            JSON.stringify({ start: now, working: true, isLate: false, isUnscheduled: true })
+          );
+        }
+      }
+    } else if (req.type === 'REPORT') {
+      // ✅ 무단 결근/징계 관련 리포트 승인 처리
+      const all = JSON.parse(localStorage.getItem('log_edit_requests') || '[]');
+      const updated = all.map((r: any) => matchId(r.id, req.id) ? { ...r, status } : r);
+      localStorage.setItem('log_edit_requests', JSON.stringify(updated));
+      pushToRequestArchive(req, status);
+
+      if (isApproved) {
+        const isNoShowLateRequest = req.reportType === 'NO_SHOW_LATE_REQUEST';
+        const crew = allCrews.find((c: any) => c.name === req.reqName && c.branchCode === req.branchCode);
+        if (crew) {
+          const pin = crew.pin;
+          const phone = crew.phone;
+
+          // 무단 결근 락 해제 (날짜 정보가 있을 경우 해당 날짜 기준)
+          if (req.targetDate && pin) {
+            const lockKey = `no_show_lock_${pin}_${req.targetDate}`;
+            localStorage.removeItem(lockKey);
+          }
+
+          // 징계 상태도 해제 (관리자 승인을 통해 복귀하는 의미)
+          if (pin) {
+            const disciplineKey = `discipline_status_${pin}`;
+            const currentDiscipline = JSON.parse(localStorage.getItem(disciplineKey) || 'null');
+            if (currentDiscipline) {
+              const cleared = { ...currentDiscipline, suspended: false };
+              localStorage.setItem(disciplineKey, JSON.stringify(cleared));
+            }
+          }
+
+          // 승인 시: 지각 뱃지로 근무 시작 처리
+          const now = Date.now();
+          const startTimeStr = new Date(now).toLocaleTimeString('ko-KR', { hour12: false });
+          const wc = JSON.parse(localStorage.getItem('working_crews') || '{}');
+          if (pin) {
+            wc[pin] = {
+              name: crew.name,
+              branchCode: crew.branchCode,
+              startTime: startTimeStr,
+              timestamp: now,
+              isUnscheduled: false,
+              isLate: true,
+              isNoShowLate: isNoShowLateRequest,
+              isSub: false
+            };
+            localStorage.setItem('working_crews', JSON.stringify(wc));
+          }
+
+          if (phone) {
+            localStorage.setItem(
+              `work_status_${phone}`,
+              JSON.stringify({ start: now, working: true, isLate: true, isNoShowLate: isNoShowLateRequest, isUnscheduled: false })
+            );
+          }
+        }
       }
     } else if (req.type === 'LOG' || req.type === 'EXPENSE') {
       const all = JSON.parse(localStorage.getItem('log_edit_requests') || '[]');
@@ -286,11 +527,36 @@ const MainDashboard: React.FC<MainDashboardProps> = ({ onLogout }) => {
               const h = Math.floor(diffMin / 60);
               const m = diffMin % 60;
               const newTotalTime = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`;
-              return { ...log, startTime: newStart, endTime: newEnd, totalWorkTime: newTotalTime };
+              return {
+                ...log,
+                date: req.targetDate || log.date,
+                startTime: newStart,
+                endTime: newEnd,
+                totalWorkTime: newTotalTime
+              };
             }
             return log;
           });
           localStorage.setItem('attendance_logs', JSON.stringify(updatedLogs));
+        }
+      }
+      if (req.type === 'EXPENSE' && isApproved) {
+        const approved = JSON.parse(localStorage.getItem('approved_expenses') || '[]');
+        const alreadyExists = approved.some((ex: any) => String(ex.requestId) === String(req.id));
+        if (!alreadyExists) {
+          approved.push({
+            requestId: req.id,
+            userPin: req.reqPin,
+            userName: req.reqName,
+            branchCode: req.branchCode,
+            date: req.targetDate,
+            amount: Number(req.amount) || 0,
+            category: req.category || '기타',
+            reason: req.reason || '',
+            receiptImage: req.receiptImage || '',
+            approvedAt: new Date().toISOString()
+          });
+          localStorage.setItem('approved_expenses', JSON.stringify(approved));
         }
       }
     } else if (req.type === 'SUB_NOTI') {
@@ -351,14 +617,55 @@ const MainDashboard: React.FC<MainDashboardProps> = ({ onLogout }) => {
     setRequests(prev => [added, ...prev].sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0)));
   };
 
+  const isMobileMgmt = viewportWidth <= 560;
+  const managementGridStyle: React.CSSProperties = {
+    ...managementGrid,
+    gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+    gap: isMobileMgmt ? '8px' : managementGrid.gap
+  };
+  const mgmtCardStyle: React.CSSProperties = {
+    ...mgmtCard,
+    minHeight: isMobileMgmt ? '96px' : '76px',
+    padding: isMobileMgmt ? '10px 6px' : mgmtCard.padding,
+    gap: isMobileMgmt ? '8px' : mgmtCard.gap,
+    flexDirection: isMobileMgmt ? 'column' : 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    textAlign: 'center'
+  };
+  const mgmtIconBadgeStyle: React.CSSProperties = {
+    ...mgmtIconBadge,
+    width: isMobileMgmt ? '28px' : mgmtIconBadge.width,
+    height: isMobileMgmt ? '28px' : mgmtIconBadge.height
+  };
+  const mgmtTextGroupStyle: React.CSSProperties = {
+    ...mgmtTextGroup,
+    alignItems: 'center',
+    width: '100%'
+  };
+  const mgmtMainTextStyle: React.CSSProperties = {
+    ...mgmtMainText,
+    fontSize: isMobileMgmt ? '12px' : mgmtMainText.fontSize,
+    lineHeight: 1.1,
+    whiteSpace: 'nowrap'
+  };
+  const mgmtSubTextStyle: React.CSSProperties = {
+    ...mgmtSubText,
+    fontSize: isMobileMgmt ? '9px' : mgmtSubText.fontSize,
+    textAlign: 'center',
+    lineHeight: 1.15,
+    whiteSpace: 'nowrap'
+  };
+
   return (
     <div style={pageWrapper}>
       <div style={topHeader}>
         <div style={titleGroup}>
           <h1 style={logoText}>지점별 실시간 현황</h1>
-          <span style={timeDisplay}>{currentTime.toLocaleString('ko-KR')}</span>
+          <span style={logoSubText}>Live Store Dashboard</span>
         </div>
-        <NotificationCenter 
+        <div style={headerRight}>
+          <NotificationCenter 
           requests={requests} 
           requestArchive={requestArchive}
           tempEdits={tempEdits} 
@@ -369,64 +676,103 @@ const MainDashboard: React.FC<MainDashboardProps> = ({ onLogout }) => {
           formatDateSafe={formatDateSafe} 
           setRequests={setRequests}
         />
+        </div>
       </div>
 
-      <div style={managementGrid}>
-        <button onClick={() => window.location.hash = '#pay-stub'} style={mgmtCard}>
-          <span style={mgmtEmoji}>💰</span>
-          <div style={mgmtTextGroup}>
-            <span style={mgmtMainText}>월급여 명세서</span>
-            <span style={mgmtSubText}>정산 내역 확인</span>
+      <div style={managementGridStyle}>
+        <button onClick={() => window.location.hash = '#pay-stub'} style={mgmtCardStyle}>
+          <span style={mgmtIconBadgeStyle}><span style={mgmtIconGlyph}>₩</span></span>
+          <div style={mgmtTextGroupStyle}>
+            <span style={mgmtMainTextStyle}>Pay</span>
+            <span style={mgmtSubTextStyle}>월급여 정산</span>
           </div>
         </button>
-        <button onClick={() => window.location.hash = '#manual-admin'} style={mgmtCard}>
-          <span style={mgmtEmoji}>📘</span>
-          <div style={mgmtTextGroup}>
-            <span style={mgmtMainText}>매뉴얼 관리</span>
-            <span style={mgmtSubText}>업무 가이드라인</span>
+        <button onClick={() => window.location.hash = '#manual-admin'} style={mgmtCardStyle}>
+          <span style={mgmtIconBadgeStyle}><span style={mgmtIconGlyph}>✎</span></span>
+          <div style={mgmtTextGroupStyle}>
+            <span style={mgmtMainTextStyle}>Manual</span>
+            <span style={mgmtSubTextStyle}>업무 가이드</span>
           </div>
         </button>
-        <button onClick={() => window.location.hash = '#crew-manager'} style={mgmtCard}>
-          <span style={mgmtEmoji}>👥</span>
-          <div style={mgmtTextGroup}>
-            <span style={mgmtMainText}>크루 관리</span>
-            <span style={mgmtSubText}>인사 정보 및 권한</span>
+        <button onClick={() => window.location.hash = '#crew-manager'} style={mgmtCardStyle}>
+          <span style={mgmtIconBadgeStyle}>
+            <span style={mgmtPersonIcon}>
+              <span style={mgmtPersonHead} />
+              <span style={mgmtPersonBody} />
+            </span>
+          </span>
+          <div style={mgmtTextGroupStyle}>
+            <span style={mgmtMainTextStyle}>Crew</span>
+            <span style={mgmtSubTextStyle}>인사 관리</span>
           </div>
         </button>
       </div>
 
       <div style={divider} />
 
-      <div style={gridContainer}>
+      <div style={branchSectionWrap}>
+        <div style={{ ...timeDisplay, marginBottom: '12px' }}>{currentTime.toLocaleString('ko-KR')}</div>
+        <div style={gridContainer}>
         {BRANCHES.map(branch => (
           <div key={branch.code} style={branchCard}>
             <div style={branchCardHeader}>
               <h3 style={branchTitle}>{branch.label}</h3>
-              <button onClick={() => setSelectedBranchCal(branch.label)} style={calBtn}>📅 스케줄</button>
+                <button onClick={() => setSelectedBranchCal(branch.label)} style={calBtn}>📅 월간 스케줄</button>
             </div>
             <div style={crewList}>
-              {workingCrews.filter(c => c.branchCode === branch.code).map((crew, idx) => (
-                <div key={idx} style={crewItem} onClick={() => handleCrewClick(crew.name, branch.code)}>
-                  <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
-                    <div style={activeIndicator} />
-                    <span style={crewName}>{crew.name}</span>
-                    <div style={{display:'flex', gap:'4px'}}>
-                      {getWorkerStatusBadges(crew).map((badge, bIdx) => (
-                        <span key={bIdx} style={{...badgeTag, color: badge.color, border: `1px solid ${badge.color}`}}>{badge.text}</span>
-                      ))}
-                    </div>
-                  </div>
-                  <span style={workTime}>{getElapsedTime(crew.timestamp)}</span>
-                </div>
-              ))}
-              {workingCrews.filter(c => c.branchCode === branch.code).length === 0 && (
-                <div style={emptyContainer}>
-                  <p style={emptyText}>현재 근무중인 크루가 없습니다.</p>
-                </div>
-              )}
+              {(() => {
+                const branchRows = getBranchDailyRows(branch.code);
+                return (
+                  <>
+                    {branchRows.map((crew: any, idx: number) => {
+                      const isMobileCompact = viewportWidth <= 560;
+                      const isActive = crew.statusType === 'active';
+                      const isFinished = crew.statusType === 'finished';
+                      const isScheduled = crew.statusType === 'scheduled';
+                      const rowOpacity = isActive ? 1 : isFinished ? 0.92 : 0.62;
+                      const rowBg = isActive ? 'rgba(255,255,255,0.03)' : isFinished ? 'rgba(255,255,255,0.07)' : 'rgba(255,255,255,0.02)';
+                      const baseNameColor = isActive ? '#ffffff' : isFinished ? '#e5e7eb' : '#9ca3af';
+                      const nameColor = isMobileCompact ? getMobilePriorityNameColor(crew, baseNameColor) : baseNameColor;
+                      const timeColor = isActive ? '#cbd5e1' : isFinished ? '#e5e7eb' : '#9ca3af';
+                      const dotColor = isActive ? '#32d74b' : isFinished ? '#d1d5db' : '#6b7280';
+                      const dotShadow = isActive ? '0 0 8px #32d74b' : 'none';
+                      const statusLabel = isActive ? '출근' : isScheduled ? '예정' : '퇴근';
+                      const timeRangeText = isActive
+                        ? `${formatHM(crew.startTime)} ~ 근무중`
+                        : `${formatHM(crew.startTime)} ~ ${formatHM(crew.endTime)}`;
+                      const workedHHMM = isActive
+                        ? getElapsedTime(crew.timestamp)
+                        : (String(crew.totalWorkTime || '').match(/\d+/g)?.slice(0, 2).map((n: string) => String(Number(n)).padStart(2, '0')).join(':') || '--:--');
+                      const timerColor = isActive ? '#facc15' : isFinished ? '#e5e7eb' : '#6b7280';
+
+                      return (
+                        <div
+                          key={idx}
+                          style={{ ...crewItem, opacity: rowOpacity, background: rowBg }}
+                          onClick={() => handleCrewClick(crew.name, branch.code)}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: '1 1 auto' }}>
+                            <span style={{ ...crewName, color: nameColor, minWidth: '80px', flexShrink: 0 }}>{crew.name}</span>
+                          </div>
+                          <div style={{ ...workTimeWrap }}>
+                            <span style={{ ...workTime, color: timeColor }}>{timeRangeText}</span>
+                            <span style={{ ...workTimer, color: timerColor }}>{workedHHMM}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {branchRows.length === 0 && (
+                      <div style={emptyContainer}>
+                        <p style={emptyText}>오늘 근무 기록이 없습니다.</p>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
             </div>
-          </div>
-        ))}
+            </div>
+          ))}
+        </div>
       </div>
 
       <div style={footerArea}>
@@ -484,15 +830,40 @@ const MainDashboard: React.FC<MainDashboardProps> = ({ onLogout }) => {
                 <p style={emptyText}>해당 월 근무 기록이 없습니다.</p>
               ) : (
                 <ul style={detailList}>
-                  {crewDetailLogs.map((log: any, i: number) => (
-                    <li key={log.id || i} style={detailRow}>
-                      <span style={detailDate}>{log.date}</span>
-                      <span style={detailTime}>{log.startTime || '-'} ~ {log.endTime || '(근무중)'}</span>
-                      <span style={detailTotal}>{log.totalWorkTime || '-'}</span>
-                      {log.isLate && <span style={detailBadge}>지각</span>}
-                      {log.isUnscheduled && <span style={{ ...detailBadge, background: 'rgba(59,130,246,0.2)', color: '#60a5fa' }}>스케줄외</span>}
-                    </li>
-                  ))}
+                  {crewDetailLogs.map((log: any, i: number) => {
+                    const day = String(log.date || '').split('-')[2] || '';
+                    const timeText =
+                      log.type === 'IN'
+                        ? `${formatHM(log.startTime)} ~ (근무중)`
+                        : log.type === 'ABSENT'
+                          ? '-'
+                          : `${formatHM(log.startTime)} ~ ${log.endTime ? formatHM(log.endTime) : '-'}`;
+                    const totalHHMM =
+                      log.type === 'IN' && Number(log.timestamp) > 0
+                        ? getElapsedTime(Number(log.timestamp))
+                        : (String(log.totalWorkTime || '-').match(/\d+/g)?.slice(0, 2).map((n: string) => String(Number(n)).padStart(2, '0')).join(':') || '-');
+                    const badges = [];
+                    if (log.type === 'ABSENT') badges.push({ text: '무단 결근', style: { ...detailBadge, background: 'rgba(127,29,29,0.25)', color: '#f87171' } });
+                    if (log.isNoShowLate) badges.push({ text: '무단 지각', style: { ...detailBadge, background: 'rgba(249,115,22,0.2)', color: '#fb923c' } });
+                    if (log.isLate) badges.push({ text: '지각', style: detailBadge });
+                    if (log.isUnscheduled) badges.push({ text: '스케줄외', style: { ...detailBadge, background: 'rgba(59,130,246,0.2)', color: '#60a5fa' } });
+                    if (log.isSub) badges.push({ text: '대타', style: { ...detailBadge, background: 'rgba(168,85,247,0.2)', color: '#c084fc' } });
+
+                    return (
+                      <li key={log.id || i} style={detailRow}>
+                        <div style={detailLeft}>
+                          <span style={detailDate}>{day ? `${day}일` : '-'}</span>
+                          <span style={detailTime}>{timeText}</span>
+                          <div style={detailBadgeRow}>
+                            {badges.map((badge, bIdx) => (
+                              <span key={bIdx} style={badge.style}>{badge.text}</span>
+                            ))}
+                          </div>
+                        </div>
+                        <span style={detailTotal}>{totalHHMM}</span>
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
               <button type="button" onClick={openPayStubForCrew} style={detailPayStubBtn}>월급여 명세서에서 보기</button>
@@ -509,29 +880,50 @@ const pageWrapper: React.CSSProperties = {
   background: '#000', minHeight: '100vh', padding: '20px 30px 60px', color: '#fff',
   fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif'
 };
-const topHeader: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '25px' };
+const topHeader: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' };
 const titleGroup: React.CSSProperties = { display: 'flex', flexDirection: 'column' };
-const logoText: React.CSSProperties = { fontSize: '22px', fontWeight: '800', letterSpacing: '-0.5px' };
-const timeDisplay: React.CSSProperties = { color: '#888', fontSize: '13px', marginTop: '2px' };
+const headerRight: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 };
+const logoText: React.CSSProperties = { fontSize: '22px', fontWeight: '800', letterSpacing: '-0.5px', margin: 0, lineHeight: 1.15 };
+const logoSubText: React.CSSProperties = { color: '#8e8e93', fontSize: '11px', fontWeight: '600', marginTop: '5px', letterSpacing: '0.2px', lineHeight: 1.2 };
+const timeDisplay: React.CSSProperties = { color: '#888', fontSize: '13px', marginTop: 0 };
+const branchSectionWrap: React.CSSProperties = { marginTop: 0 };
 const logoutBtn: React.CSSProperties = { background: 'rgba(255,69,58,0.1)', border: 'none', color: '#ff453a', padding: '8px 15px', borderRadius: '12px', fontSize: '12px', fontWeight: '600', cursor: 'pointer' };
-const managementGrid: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '15px', marginBottom: '30px' };
-const mgmtCard: React.CSSProperties = { background: '#1c1c1e', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '18px', padding: '18px', display: 'flex', alignItems: 'center', gap: '15px', cursor: 'pointer', textAlign: 'left', transition: 'transform 0.2s, background 0.2s' };
-const mgmtEmoji: React.CSSProperties = { fontSize: '24px' };
+const managementGrid: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '26px' };
+const mgmtCard: React.CSSProperties = { background: '#1c1c1e', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '16px', padding: '14px 15px', display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', textAlign: 'left', transition: 'transform 0.2s, background 0.2s' };
+const mgmtIconBadge: React.CSSProperties = { width: '30px', height: '30px', borderRadius: '8px', border: '1px solid rgba(148,163,184,0.55)', background: 'rgba(148,163,184,0.12)', color: '#cbd5e1', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 };
+const mgmtIconGlyph: React.CSSProperties = { fontSize: '15px', fontWeight: '700', lineHeight: 1 };
+const mgmtPersonIcon: React.CSSProperties = { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '2px', lineHeight: 1 };
+const mgmtPersonHead: React.CSSProperties = { width: '7px', height: '7px', borderRadius: '50%', background: '#cbd5e1' };
+const mgmtPersonBody: React.CSSProperties = { width: '12px', height: '6px', borderRadius: '6px 6px 4px 4px', background: '#cbd5e1' };
 const mgmtTextGroup: React.CSSProperties = { display: 'flex', flexDirection: 'column' };
-const mgmtMainText: React.CSSProperties = { fontSize: '15px', fontWeight: '700', color: '#fff' };
-const mgmtSubText: React.CSSProperties = { fontSize: '11px', color: '#8e8e93', marginTop: '2px' };
+const mgmtMainText: React.CSSProperties = { fontSize: '14px', fontWeight: '700', color: '#fff' };
+const mgmtSubText: React.CSSProperties = { fontSize: '10px', color: '#8e8e93', marginTop: '2px' };
 const divider: React.CSSProperties = { height: '1px', background: 'rgba(255,255,255,0.1)', marginBottom: '30px' };
-const gridContainer: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '20px' };
+const gridContainer: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px' };
 const branchCard: React.CSSProperties = { background: '#1c1c1e', borderRadius: '24px', padding: '24px', border: '1px solid rgba(255,255,255,0.05)', boxShadow: '0 10px 30px rgba(0,0,0,0.3)' };
 const branchCardHeader: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' };
 const branchTitle: React.CSSProperties = { color: '#fff', fontSize: '19px', fontWeight: '800' };
-const calBtn: React.CSSProperties = { background: '#2c2c2e', border: 'none', color: '#0a84ff', padding: '6px 12px', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '700' };
+const calBtn: React.CSSProperties = {
+  background: 'linear-gradient(135deg, rgba(10,132,255,0.22) 0%, rgba(56,189,248,0.18) 100%)',
+  border: '1px solid rgba(56,189,248,0.55)',
+  color: '#7dd3fc',
+  padding: '8px 14px',
+  borderRadius: '10px',
+  cursor: 'pointer',
+  fontSize: '12px',
+  fontWeight: '800',
+  letterSpacing: '0.2px',
+  boxShadow: '0 4px 12px rgba(56,189,248,0.18)'
+};
 const crewList: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: '8px' };
-const crewItem: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.03)', padding: '14px 18px', borderRadius: '14px', cursor: 'pointer', transition: '0.2s' };
+const crewItem: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.03)', padding: '14px 28px', borderRadius: '14px', cursor: 'pointer', transition: '0.2s', minHeight: '48px', boxSizing: 'border-box' };
 const activeIndicator: React.CSSProperties = { width: '8px', height: '8px', background: '#32d74b', borderRadius: '50%', boxShadow: '0 0 8px #32d74b' };
-const crewName: React.CSSProperties = { fontWeight: '700', fontSize: '14px' };
+const crewName: React.CSSProperties = { fontWeight: '700', fontSize: '12px' };
 const badgeTag: React.CSSProperties = { fontSize: '9px', fontWeight: '800', padding: '1px 5px', borderRadius: '4px', textTransform: 'uppercase' };
-const workTime: React.CSSProperties = { color: '#32d74b', fontSize: '13px', fontWeight: '700', fontFamily: 'monospace' };
+const workStatusMid: React.CSSProperties = { width: 18, height: 18, borderRadius: '50%', marginLeft: '8px', flexShrink: 0 };
+const workTimeWrap: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: '10px', marginLeft: '8px', flexShrink: 0 };
+const workTime: React.CSSProperties = { color: '#32d74b', fontSize: '12px', fontWeight: '700', fontFamily: 'monospace' };
+const workTimer: React.CSSProperties = { fontSize: '12px', fontWeight: '800', fontFamily: 'monospace', minWidth: '44px', textAlign: 'right' };
 const emptyContainer: React.CSSProperties = { padding: '30px 0', textAlign: 'center' };
 const emptyText: React.CSSProperties = { color: '#48484a', fontSize: '13px', fontWeight: '500' };
 const footerArea: React.CSSProperties = { marginTop: '50px', display: 'flex', justifyContent: 'center', position: 'relative' };
@@ -547,10 +939,12 @@ const detailModalTitle: React.CSSProperties = { margin: 0, fontSize: '18px', fon
 const detailCloseBtn: React.CSSProperties = { background: 'none', border: 'none', color: '#888', fontSize: '24px', cursor: 'pointer', padding: 0, lineHeight: 1 };
 const detailModalBody: React.CSSProperties = { overflowY: 'auto', padding: '16px' };
 const detailList: React.CSSProperties = { listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: '8px' };
-const detailRow: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 14px', background: 'rgba(255,255,255,0.05)', borderRadius: '12px', fontSize: '13px', flexWrap: 'wrap' };
-const detailDate: React.CSSProperties = { fontWeight: '700', color: '#fff', minWidth: '100px' };
-const detailTime: React.CSSProperties = { color: '#aaa', flex: 1 };
-const detailTotal: React.CSSProperties = { color: '#32d74b', fontWeight: '600', fontFamily: 'monospace' };
+const detailRow: React.CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', padding: '12px 14px', background: 'rgba(255,255,255,0.05)', borderRadius: '12px', fontSize: '13px' };
+const detailLeft: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: 0, flexWrap: 'wrap' };
+const detailDate: React.CSSProperties = { fontWeight: '700', color: '#fff', minWidth: '44px' };
+const detailTime: React.CSSProperties = { color: '#aaa' };
+const detailBadgeRow: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' };
+const detailTotal: React.CSSProperties = { color: '#facc15', fontWeight: '700', fontFamily: 'monospace', marginLeft: '8px', flexShrink: 0, minWidth: '44px', textAlign: 'right' };
 const detailBadge: React.CSSProperties = { fontSize: '10px', fontWeight: '700', padding: '2px 6px', borderRadius: '6px', background: 'rgba(255,59,48,0.2)', color: '#ff3b30' };
 const detailHint: React.CSSProperties = { fontSize: '12px', color: '#888', marginBottom: '12px' };
 const detailMonthRow: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px' };

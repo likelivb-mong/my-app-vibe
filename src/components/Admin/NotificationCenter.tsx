@@ -29,6 +29,7 @@ export default function NotificationCenter({
     if (r.type === 'PROFILE') return `프로필 수정 요청 · ${r.reqName}`;
     if (r.type === 'LOG') return `근무 시간 수정 요청 · ${r.reqName} (${r.targetDate})`;
     if (r.type === 'EXPENSE') return `지원금 청구 요청 · ${r.reqName}`;
+    if (r.type === 'REPORT') return r.reportType === 'NO_SHOW_LATE_REQUEST' ? `무단 지각 출근 승인 요청 · ${r.reqName}` : `징계/결근 리포트 · ${r.reqName}`;
     if (r.type === 'UNSCHEDULED_WORK') return `스케줄 외 근무 신청이 요청되었습니다. · ${r.reqName} (${r.targetDate || r.requestDate})`;
     if (r.type === 'SUB_NOTI' || r.type === 'SUB_REQUEST') return `대타 요청 대기중, ${r.fromName || '?'} 가 ${r.toName || '?'} 에게`;
     return '요청';
@@ -37,8 +38,19 @@ export default function NotificationCenter({
   const getReqDetail = (r: any) => {
     if (r.type === 'UNSCHEDULED_WORK') return `스케줄 외 근무 신청이 요청되었습니다. · 요청 시간: ${r.startTime || '-'}`;
     if (r.type === 'LOG') return `수정 희망: ${r.newStartTime || '-'} ~ ${r.newEndTime || '(중)'}`;
+    if (r.type === 'EXPENSE') return `${r.targetDate || '-'} · ${r.category || '기타'} · ₩${(Number(r.amount) || 0).toLocaleString()}`;
+    if (r.type === 'REPORT') return `${r.targetDate || '-'} · ${r.reason || ''}`;
     if (r.type === 'SUB_NOTI' || r.type === 'SUB_REQUEST') return `대상일: ${r.targetDate || '-'} · ${r.targetStartTime || ''} ~ ${r.targetEndTime || ''}`;
     return r.reason || '';
+  };
+
+  const handleOpenReceipt = (img?: string) => {
+    if (!img) {
+      alert('첨부된 영수증이 없습니다.');
+      return;
+    }
+    const win = window.open('');
+    win?.document.write(`<img src="${img}" style="max-width:100%" alt="영수증 이미지" />`);
   };
 
   return (
@@ -81,6 +93,12 @@ export default function NotificationCenter({
                       <div style={cardTitle}>{getReqLabel(req)}</div>
                       {req.requestDate && <div style={cardMeta}>요청 일시: {req.requestDate}</div>}
                       <div style={cardReason}>{getReqDetail(req) || req.reason}</div>
+                      {req.type === 'EXPENSE' && (
+                        <div style={expenseMetaRow}>
+                          <span style={expenseReasonText}>{req.reason || '청구 사유 없음'}</span>
+                          <button type="button" onClick={() => handleOpenReceipt(req.receiptImage)} style={receiptBtn}>열어보기</button>
+                        </div>
+                      )}
                       {req.type === 'LOG' && (
                         <div style={timeRow}>
                           <input
@@ -123,6 +141,12 @@ export default function NotificationCenter({
                     <div style={cardTitle}>{getReqLabel(archived)}</div>
                     {archived.requestDate && <div style={cardMeta}>요청 일시: {archived.requestDate}</div>}
                     <div style={cardReason}>{getReqDetail(archived) || archived.reason}</div>
+                    {archived.type === 'EXPENSE' && (
+                      <div style={expenseMetaRow}>
+                        <span style={expenseReasonText}>{archived.reason || '청구 사유 없음'}</span>
+                        <button type="button" onClick={() => handleOpenReceipt(archived.receiptImage)} style={receiptBtn}>열어보기</button>
+                      </div>
+                    )}
                     <div style={archiveFooter}>
                       <span style={{ fontSize: '11px', color: archived.archiveStatus === 'approved' ? '#30d158' : archived.archiveStatus === 'rejected' ? '#ff453a' : '#888' }}>
                         {archived.archiveStatus === 'approved' ? '승인됨' : archived.archiveStatus === 'rejected' ? '거절됨' : '취소됨'}
@@ -213,6 +237,9 @@ const card: React.CSSProperties = {
 const cardTitle: React.CSSProperties = { fontSize: '13px', fontWeight: '600', color: '#fff', marginBottom: '4px' };
 const cardMeta: React.CSSProperties = { fontSize: '11px', color: '#666', marginBottom: '4px' };
 const cardReason: React.CSSProperties = { fontSize: '12px', color: '#888', marginBottom: '10px' };
+const expenseMetaRow: React.CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '10px' };
+const expenseReasonText: React.CSSProperties = { fontSize: '12px', color: '#a1a1aa', flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
+const receiptBtn: React.CSSProperties = { background: 'rgba(10,132,255,0.16)', border: '1px solid #0a84ff', color: '#9cc9ff', padding: '6px 10px', borderRadius: '8px', fontSize: '11px', fontWeight: 700, cursor: 'pointer', flexShrink: 0 };
 const subWaitingText: React.CSSProperties = { fontSize: '12px', color: '#888', marginTop: '8px', fontStyle: 'italic' };
 const archiveFooter: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginTop: '8px', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,0.06)' };
 const restoreBtn: React.CSSProperties = { background: 'rgba(0,122,255,0.2)', border: '1px solid #007aff', color: '#007aff', padding: '6px 12px', borderRadius: '8px', fontSize: '11px', fontWeight: '600', cursor: 'pointer' };

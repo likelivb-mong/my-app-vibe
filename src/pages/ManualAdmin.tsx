@@ -69,17 +69,16 @@ export default function ManualAdmin() {
           </button>
           <div style={{ height: "20px", borderRight: "1px solid #333" }}></div>
           <h1 style={{ fontSize: "20px", fontWeight: "700", margin: 0, color: "#fff" }}>
-            📘 매뉴얼 편집기
+            Manual
           </h1>
         </div>
-        {/* ✅ 페이지 이동 대신 팝업 상태를 true로 변경 */}
         <button onClick={() => setIsPreviewOpen(true)} style={previewBtn}>
-          👁️ 미리보기
+          미리보기
         </button>
       </header>
 
-      <div style={gridContainer}>
-        {/* 왼쪽: 에디터 */}
+      <div style={columnContainer}>
+        {/* 상단: 새 매뉴얼 작성 폼 */}
         <section style={editorSection}>
           <div style={sectionHeader}>
             <h3 style={{ margin: 0, fontSize: "16px", color: editingId ? "#facc15" : "#fff" }}>
@@ -115,7 +114,7 @@ export default function ManualAdmin() {
           </div>
         </section>
 
-        {/* 오른쪽: 리스트 */}
+        {/* 하단: 등록된 목록 */}
         <section style={listSection}>
           <div style={sectionHeader}>
             <h3 style={{ margin: 0, fontSize: "16px" }}>등록된 목록 ({items.length})</h3>
@@ -124,7 +123,7 @@ export default function ManualAdmin() {
             {items.length === 0 ? (
               <div style={emptyState}>
                 <div style={{ fontSize: "40px", marginBottom: "10px" }}>📭</div>
-                등록된 매뉴얼이 없습니다.<br />왼쪽에서 내용을 작성해주세요.
+                등록된 매뉴얼이 없습니다.<br />위에서 내용을 작성해주세요.
               </div>
             ) : (
               items.map((item) => (
@@ -205,20 +204,20 @@ const headerStyle: React.CSSProperties = { display: "flex", justifyContent: "spa
 const navBtn: React.CSSProperties = { background: "transparent", border: "1px solid #333", color: "#888", padding: "8px 16px", borderRadius: "20px", cursor: "pointer", fontSize: "13px", transition: "0.2s" };
 const previewBtn: React.CSSProperties = { background: "#1a1a1a", border: "1px solid #333", color: "#4ade80", padding: "8px 16px", borderRadius: "20px", cursor: "pointer", fontSize: "13px", fontWeight: "bold" };
 
-const gridContainer: React.CSSProperties = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "40px", height: "calc(100vh - 120px)" };
+const columnContainer: React.CSSProperties = { display: "flex", flexDirection: "column", gap: "28px", paddingBottom: "24px" };
 
 // Editor Styles
 const editorSection: React.CSSProperties = { display: "flex", flexDirection: "column" };
 const sectionHeader: React.CSSProperties = { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "15px", height: "30px" };
 const resetBtn: React.CSSProperties = { background: "none", border: "none", color: "#888", fontSize: "12px", textDecoration: "underline", cursor: "pointer" };
 const inputStyle: React.CSSProperties = { width: "100%", background: "#151515", border: "1px solid #333", color: "#fff", padding: "15px", borderRadius: "12px", fontSize: "15px", outline: "none", boxSizing: "border-box" };
-const textareaStyle: React.CSSProperties = { width: "100%", flex: 1, background: "#151515", border: "1px solid #333", color: "#fff", padding: "15px", borderRadius: "12px", fontSize: "14px", lineHeight: "1.6", outline: "none", resize: "none", boxSizing: "border-box" };
+const textareaStyle: React.CSSProperties = { width: "100%", minHeight: "140px", background: "#151515", border: "1px solid #333", color: "#fff", padding: "15px", borderRadius: "12px", fontSize: "14px", lineHeight: "1.6", outline: "none", resize: "vertical", boxSizing: "border-box" };
 const submitBtn: React.CSSProperties = { background: "#3b82f6", color: "#fff", border: "none", padding: "15px", borderRadius: "12px", fontSize: "15px", fontWeight: "bold", cursor: "pointer", marginTop: "auto" };
 const updateBtn: React.CSSProperties = { background: "#facc15", color: "#000", border: "none", padding: "15px", borderRadius: "12px", fontSize: "15px", fontWeight: "bold", cursor: "pointer", marginTop: "auto" };
 
 // List Styles
-const listSection: React.CSSProperties = { display: "flex", flexDirection: "column", background: "#111", borderRadius: "20px", border: "1px solid #222", padding: "20px", overflow: "hidden" };
-const scrollArea: React.CSSProperties = { flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: "10px", paddingRight: "5px" };
+const listSection: React.CSSProperties = { display: "flex", flexDirection: "column", background: "#111", borderRadius: "20px", border: "1px solid #222", padding: "20px", overflow: "hidden", minHeight: "200px" };
+const scrollArea: React.CSSProperties = { flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: "10px", paddingRight: "5px", minHeight: "120px" };
 const emptyState: React.CSSProperties = { display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", color: "#444", textAlign: "center", lineHeight: "1.5", fontSize: "13px" };
 const itemCard: React.CSSProperties = { background: "#1a1a1a", padding: "15px", borderRadius: "12px", display: "flex", justifyContent: "space-between", alignItems: "center", border: "1px solid #2a2a2a", transition: "0.2s" };
 const activeItemCard: React.CSSProperties = { ...itemCard, border: "1px solid #facc15", background: "#222" };

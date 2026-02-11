@@ -21,16 +21,16 @@ interface Props {
 export default function MyInfoModal({ user, currentUser, statsMonth, setStatsMonth, myStats, editRequest, setEditRequest, onClose, onSendRequest }: Props) {
   return (
     <div style={overlay} onClick={onClose}>
-      <div style={{...modal, display:'flex', flexDirection:'column', maxHeight:'85vh'}} onClick={e => e.stopPropagation()}>
+      <div style={{...modal, display:'flex', flexDirection:'column', maxHeight:'85vh', color:'#0f172a'}} onClick={e => e.stopPropagation()}>
         <div style={modalHeader}>
-          <h3>👤 내 정보</h3>
+          <h3 style={{margin:0, color:'#0f172a'}}>👤 My Page</h3>
           <button onClick={onClose} style={closeBtn}>×</button>
         </div>
         <div style={{flex:1, overflowY:'auto', paddingBottom:'20px'}}>
           
-          <div style={{marginBottom:'15px', padding:'10px', background:'#FEFCE8', borderRadius:'8px', border:'1px solid #FEF08A', textAlign:'center'}}>
-            <span style={{fontSize:'12px', color:'#854D0E', marginRight:'5px'}}>My PIN:</span>
-            <span style={{fontSize:'16px', fontWeight:'bold', fontFamily:'monospace'}}>{currentUser.pin}</span>
+          <div style={{marginBottom:'15px', padding:'10px', background:'#111827', borderRadius:'8px', border:'1px solid #111827', textAlign:'center'}}>
+            <span style={{fontSize:'12px', color:'#e2e8f0', marginRight:'5px'}}>My PIN:</span>
+            <span style={{fontSize:'16px', fontWeight:'bold', fontFamily:'monospace', color:'#ffffff'}}>{currentUser.pin}</span>
           </div>
 
           <div style={{marginBottom:'20px'}}>
@@ -43,9 +43,9 @@ export default function MyInfoModal({ user, currentUser, statsMonth, setStatsMon
             <div style={statBox}><div style={statLabel}>이번 달 결근</div><div style={statValue}>{myStats.absentCount}회</div></div>
           </div>
 
-          <div style={formGroup}><label style={{fontSize:'12px', color:'#8E8E93'}}>이름</label><input value={user.name} disabled style={inputDisabled} /></div>
-          <div style={formGroup}><label style={{fontSize:'12px', color:'#8E8E93'}}>직책</label><input value={currentUser.position || '크루'} disabled style={inputDisabled} /></div>
-          <div style={formGroup}><label style={{fontSize:'12px', color:'#8E8E93'}}>전화번호</label><input value={currentUser.phone} disabled style={inputDisabled} /></div>
+          <div style={formGroup}><label style={{fontSize:'12px', color:'#475569', fontWeight: 700}}>이름</label><input value={user.name} disabled style={inputDisabled} /></div>
+          <div style={formGroup}><label style={{fontSize:'12px', color:'#475569', fontWeight: 700}}>직책</label><input value={currentUser.position || '크루'} disabled style={inputDisabled} /></div>
+          <div style={formGroup}><label style={{fontSize:'12px', color:'#475569', fontWeight: 700}}>전화번호</label><input value={currentUser.phone} disabled style={inputDisabled} /></div>
           
           <div style={payDetailBox}>
             <div>기본급: ₩{currentUser.basePay?.toLocaleString() || 0}</div>

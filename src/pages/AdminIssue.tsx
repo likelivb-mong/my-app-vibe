@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { BRANCHES } from '../utils/branches';
 import { makeInvitePin4 } from '../utils/pin';
 import type { CrewInvite } from '../types';
+import AppSelect from '../components/common/AppSelect';
 
 export default function AdminIssue() {
   // ... (보내주신 코드 내용 그대로)
@@ -70,15 +71,12 @@ export default function AdminIssue() {
 
         <div>
           <label style={labelStyle}>배정 지점</label>
-          <select
+          <AppSelect
             value={branchCode}
-            onChange={(e) => setBranchCode(e.target.value)}
+            onChange={setBranchCode}
             style={inputStyle}
-          >
-            {BRANCHES.map((b) => (
-              <option key={b.code} value={b.code}>{b.label}</option>
-            ))}
-          </select>
+            options={BRANCHES.map((b) => ({ value: b.code, label: b.label }))}
+          />
         </div>
 
         <button type="submit" style={buttonStyle}>승인 PIN 발급하기</button>

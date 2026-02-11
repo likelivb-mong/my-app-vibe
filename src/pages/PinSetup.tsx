@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, useRef } from "react";
 import { BRANCHES } from "../utils/branches";
+import AppSelect from "../components/common/AppSelect";
 
 // 주요 은행 목록
 const BANK_LIST = [
@@ -22,6 +23,7 @@ const SHIFT_OPTIONS = [
   "평일 오픈", "평일 미들", "평일 마감",
   "주말 오픈", "주말 미들", "주말 마감"
 ];
+const MAX_ID_IMAGE_SIZE_BYTES = 5 * 1024 * 1024; // 5MB
 
 type CrewPinStatus = "active" | "terminated";
 
@@ -79,6 +81,7 @@ export default function PinSetup() {
   const [createdPin, setCreatedPin] = useState("");
   
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const fromRef = useRef(typeof window !== "undefined" ? window.location.hash : "");
 
   useEffect(() => {
     const today = new Date().toISOString().split('T')[0];
@@ -111,8 +114,7 @@ export default function PinSetup() {
     setEmailLocal(val);
   };
 
-  const handleDomainChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const val = e.target.value;
+  const handleDomainChange = (val: string) => {
     if (val === "직접 입력") {
       setIsCustomDomain(true);
       setEmailDomain("");
@@ -139,7 +141,15 @@ export default function PinSetup() {
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      if (file.size > MAX_ID_IMAGE_SIZE_BYTES) {
+        alert("사진 용량이 너무 커서 첨부에 실패했습니다.\n5MB 이하 이미지로 다시 시도해주세요.");
+        e.target.value = "";
+        return;
+      }
       const reader = new FileReader();
+      reader.onerror = () => {
+        alert("사진 첨부에 실패했습니다.\n용량을 줄인 뒤 다시 시도해주세요.");
+      };
       reader.onloadend = () => {
         setIdCardImage(reader.result as string);
       };
@@ -237,9 +247,28 @@ export default function PinSetup() {
 
   return (
     <div style={{ minHeight: "100vh", padding: 24, background: "#111", color: "#fff" }}>
-      <h1 style={{ fontSize: 28, marginBottom: 18 }}>크루 등록 신청</h1>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
+        <h1 style={{ fontSize: 22, margin: 0, fontWeight: 700 }}>크루 등록 신청</h1>
+        <button
+          type="button"
+          onClick={() => { window.location.hash = fromRef.current === "#admin-issue" ? "crew-manager" : "login"; }}
+          aria-label="닫기"
+          style={{
+            padding: 0,
+            margin: 0,
+            border: "none",
+            background: "none",
+            color: "#aaa",
+            fontSize: 24,
+            cursor: "pointer",
+            lineHeight: 1
+          }}
+        >
+          ×
+        </button>
+      </div>
 
-      <div style={{ maxWidth: 520 }}>
+      <div style={{ maxWidth: 640, width: "100%" }}>
         <label style={labelStyle}>이름</label>
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="예: 홍길동" style={inputStyle} />
         <div style={{ height: 14 }} />
@@ -249,9 +278,13 @@ export default function PinSetup() {
         <div style={{ height: 14 }} />
 
         <label style={labelStyle}>근무 지점</label>
-        <select value={branchCode} onChange={(e) => setBranchCode(e.target.value)} style={inputStyle}>
-          {BRANCHES.map((b) => (<option key={b.code} value={b.code}>{b.label} ({b.code})</option>))}
-        </select>
+        <AppSelect
+          value={branchCode}
+          onChange={setBranchCode}
+          style={inputStyle}
+          optionStyle={{ fontSize: 14, minHeight: 36, padding: "8px 10px" }}
+          options={BRANCHES.map((b) => ({ value: b.code, label: `${b.label} (${b.code})` }))}
+        />
         <div style={{ height: 14 }} />
 
         {/* ✅ [수정] 3열 그리드 버튼 방식 (CrewManager와 동일 디자인) */}
@@ -267,7 +300,7 @@ export default function PinSetup() {
                             padding: '12px 0',
                             borderRadius: '8px',
                             border: '1px solid',
-                            fontSize: '13px',
+                            fontSize: '14px',
                             cursor: 'pointer',
                             transition: 'all 0.2s',
                             // 선택됨: 파란색 / 선택안됨: 어두운 회색
@@ -285,15 +318,40 @@ export default function PinSetup() {
         <div style={{ height: 14 }} />
 
         <label style={labelStyle}>전화번호 (숫자만 입력)</label>
-        <input type="tel" value={phone} onChange={(e) => handleNumberInput(setPhone, e.target.value)} placeholder="예: 01012345678" style={inputStyle} />
+        <input
+          type="tel"
+          value={phone}
+          onChange={(e) => handleNumberInput(setPhone, e.target.value, 11)}
+          placeholder="예: 01012345678"
+          style={inputStyle}
+          maxLength={11}
+        />
         <div style={{ height: 14 }} />
 
         <label style={labelStyle}>이메일</label>
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-            <input value={emailLocal} onChange={handleEmailInput} placeholder="영문/숫자 아이디" style={{ ...inputStyle, flex: 1 }} />
-            <span style={{ fontSize: '18px', fontWeight: 'bold', color: '#888' }}>@</span>
-            {isCustomDomain ? <input value={emailDomain} onChange={(e) => setEmailDomain(e.target.value)} placeholder="도메인 입력" style={{ ...inputStyle, flex: 1 }} /> : <input value={emailDomain} readOnly style={{ ...inputStyle, flex: 1, background: '#222', color: '#aaa' }} />}
-            <select onChange={handleDomainChange} value={isCustomDomain ? "직접 입력" : emailDomain} style={{ ...inputStyle, flex: 1 }}>{EMAIL_DOMAINS.map(domain => (<option key={domain} value={domain}>{domain}</option>))}</select>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', width: '100%' }}>
+            <input
+              value={emailLocal}
+              onChange={handleEmailInput}
+              placeholder="영문/숫자 아이디"
+              style={{ ...inputStyle, flex: isCustomDomain ? 1.1 : 2.2, minWidth: 0 }}
+            />
+            <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#888' }}>@</span>
+            {isCustomDomain && (
+              <input
+                value={emailDomain}
+                onChange={(e) => setEmailDomain(e.target.value)}
+                placeholder="영문/숫자만"
+                style={{ ...inputStyle, flex: 3.6, minWidth: 0 }}
+              />
+            )}
+            <AppSelect
+              value={isCustomDomain ? "직접 입력" : emailDomain}
+              onChange={handleDomainChange}
+              style={{ ...inputStyle, flex: `0 0 ${isCustomDomain ? 96 : 132}px`, maxWidth: `${isCustomDomain ? 96 : 132}px`, minWidth: 0, fontSize: 14, padding: '10px 10px' }}
+              optionStyle={{ fontSize: 14, minHeight: 36, padding: '8px 10px' }}
+              options={EMAIL_DOMAINS.map((domain) => ({ value: domain, label: domain }))}
+            />
         </div>
         <div style={{ height: 14 }} />
 
@@ -302,15 +360,30 @@ export default function PinSetup() {
         <div style={{ height: 14 }} />
 
         <label style={labelStyle}>급여 입금 계좌</label>
-        <div style={{ display: 'flex', gap: '8px' }}>
-            <select value={bankName} onChange={e => setBankName(e.target.value)} style={{...inputStyle, flex: 1}}><option value="" disabled>은행 선택</option>{BANK_LIST.map(bank => (<option key={bank} value={bank}>{bank}</option>))}</select>
-            <input type="tel" placeholder="계좌번호 (숫자만)" value={accountNumber} onChange={e => handleNumberInput(setAccountNumber, e.target.value)} style={{...inputStyle, flex: 2}} />
+        <div style={{ display: 'flex', gap: '8px', width: '100%' }}>
+            <AppSelect
+              value={bankName}
+              onChange={setBankName}
+              style={{ ...inputStyle, flex: '0 0 132px', maxWidth: '132px', fontSize: 14, padding: '10px 10px' }}
+              optionStyle={{ fontSize: 14, minHeight: 36, padding: '8px 10px' }}
+              options={[
+                { value: "", label: "은행 선택", disabled: true },
+                ...BANK_LIST.map((bank) => ({ value: bank, label: bank })),
+              ]}
+            />
+            <input
+              type="tel"
+              placeholder="계좌번호 (숫자만)"
+              value={accountNumber}
+              onChange={e => handleNumberInput(setAccountNumber, e.target.value)}
+              style={{ ...inputStyle, flex: '1 1 auto', minWidth: 0 }}
+            />
         </div>
         <div style={{ height: 14 }} />
 
         <label style={labelStyle}>주민등록증 사본 (또는 신분증)</label>
         <div style={{ border: '1px dashed #444', borderRadius: '8px', padding: '16px', textAlign: 'center', background: '#1a1a1a', cursor: 'pointer', position: 'relative' }} onClick={() => fileInputRef.current?.click()}>
-            {idCardImage ? (<div><img src={idCardImage} alt="ID Preview" style={{ maxHeight: '150px', maxWidth: '100%', borderRadius: '4px' }} /><div style={{fontSize: '12px', color: '#888', marginTop: '4px'}}>이미지 변경하려면 클릭</div></div>) : (<div style={{ color: '#888', fontSize: '14px', padding: '20px 0' }}>📷 여기를 눌러 사진을 등록하세요</div>)}
+            {idCardImage ? (<div><img src={idCardImage} alt="ID Preview" style={{ maxHeight: '150px', maxWidth: '100%', borderRadius: '4px' }} /><div style={{fontSize: '14px', color: '#888', marginTop: '4px'}}>이미지 변경하려면 클릭</div></div>) : (<div style={{ color: '#888', fontSize: '14px', padding: '20px 0' }}>📷 여기를 눌러 사진을 등록하세요</div>)}
             <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept="image/*" style={{ display: 'none' }} />
         </div>
 
@@ -340,8 +413,8 @@ export default function PinSetup() {
 }
 
 const labelStyle: React.CSSProperties = { display: "block", marginBottom: 6, opacity: 0.8, fontSize: "14px", fontWeight: "bold", color: "#ccc" };
-const inputStyle: React.CSSProperties = { width: "100%", padding: "12px 14px", fontSize: 16, borderRadius: 8, border: "1px solid #444", background: "#1a1a1a", color: "#fff", boxSizing: "border-box" };
-const submitBtn: React.CSSProperties = { width: "100%", padding: "16px", fontSize: 18, fontWeight: "bold", borderRadius: 12, border: "none", marginTop: "10px", transition: "all 0.2s ease" };
-const primaryBtn: React.CSSProperties = { width: "100%", padding: "12px 14px", fontSize: 16, borderRadius: 10, border: "none", background: "#3b5cff", color: "#fff", cursor: "pointer" };
+const inputStyle: React.CSSProperties = { width: "100%", padding: "12px 14px", fontSize: 14, borderRadius: 8, border: "1px solid #444", background: "#1a1a1a", color: "#fff", boxSizing: "border-box" };
+const submitBtn: React.CSSProperties = { width: "100%", padding: "16px", fontSize: 14, fontWeight: "bold", borderRadius: 12, border: "none", marginTop: "10px", transition: "all 0.2s ease" };
+const primaryBtn: React.CSSProperties = { width: "100%", padding: "12px 14px", fontSize: 14, borderRadius: 10, border: "none", background: "#3b5cff", color: "#fff", cursor: "pointer" };
 const modalOverlay: React.CSSProperties = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 };
 const modalContent: React.CSSProperties = { background: '#1a1a1a', padding: '32px', borderRadius: '24px', maxWidth: '320px', width: '90%', textAlign: 'center', border: '1px solid #333', boxShadow: '0 20px 50px rgba(0,0,0,0.5)' };
