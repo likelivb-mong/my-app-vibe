@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 interface Props {
   requests: any[];
@@ -25,22 +25,93 @@ export default function NotificationCenter({
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<'pending' | 'archive'>('pending');
 
+  const [viewportWidth, setViewportWidth] = useState<number>(
+    typeof window !== 'undefined' ? window.innerWidth : 1024
+  );
+
+  useEffect(() => {
+    const onResize = () => setViewportWidth(window.innerWidth);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  const isPhone = viewportWidth <= 560;
+
+  const getNameWithBranch = (r: any) => {
+    const name = r.reqName || r.fromName || r.toName || '크루';
+    const code = r.branchCode;
+    return code ? `${name} (${code})` : name;
+  };
+
   const getReqLabel = (r: any) => {
-    if (r.type === 'PROFILE') return `프로필 수정 요청 · ${r.reqName}`;
-    if (r.type === 'LOG') return `근무 시간 수정 요청 · ${r.reqName} (${r.targetDate})`;
-    if (r.type === 'EXPENSE') return `지원금 청구 요청 · ${r.reqName}`;
-    if (r.type === 'REPORT') return r.reportType === 'NO_SHOW_LATE_REQUEST' ? `무단 지각 출근 승인 요청 · ${r.reqName}` : `징계/결근 리포트 · ${r.reqName}`;
-    if (r.type === 'UNSCHEDULED_WORK') return `스케줄 외 근무 신청이 요청되었습니다. · ${r.reqName} (${r.targetDate || r.requestDate})`;
-    if (r.type === 'SUB_NOTI' || r.type === 'SUB_REQUEST') return `대타 요청 대기중, ${r.fromName || '?'} 가 ${r.toName || '?'} 에게`;
-    return '요청';
+    const who = getNameWithBranch(r);
+
+    if (r.type === 'PROFILE') return `프로필 수정 요청 · ${who}`;
+    if (r.type === 'LOG') return `근무 시간 수정 요청 · ${who}`;
+    if (r.type === 'EXPENSE') return `지원금 청구 요청 · ${who}`;
+    if (r.type === 'REPORT') {
+      return r.reportType === 'NO_SHOW_LATE_REQUEST'
+        ? `무단 지각 출근 승인 요청 · ${who}`
+        : `징계/결근 리포트 · ${who}`;
+    }
+    if (r.type === 'UNSCHEDULED_WORK') return `스케줄 외 근무 신청 · ${who}`;
+    if (r.type === 'SUB_NOTI' || r.type === 'SUB_REQUEST') {
+      // 대타 요청은 기존 문구 유지 (필요 시 추후 별도 디자인)
+      return `대타 요청 대기중, ${r.fromName || '?'} 가 ${r.toName || '?'} 에게`;
+    }
+    return `요청 · ${who}`;
+  };
+
+  const formatKoreanDateTime = (value: any) => {
+    if (!value) return '-';
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return String(value);
+    return d.toLocaleString('ko-KR', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      weekday: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    });
+  };
+
+  const formatTimeHM = (value: any) => {
+    if (!value) return '-';
+    const str = String(value);
+    const m = str.match(/^(\d{1,2}:\d{2})/);
+    return m ? m[1] : str;
   };
 
   const getReqDetail = (r: any) => {
-    if (r.type === 'UNSCHEDULED_WORK') return `스케줄 외 근무 신청이 요청되었습니다. · 요청 시간: ${r.startTime || '-'}`;
-    if (r.type === 'LOG') return `수정 희망: ${r.newStartTime || '-'} ~ ${r.newEndTime || '(중)'}`;
-    if (r.type === 'EXPENSE') return `${r.targetDate || '-'} · ${r.category || '기타'} · ₩${(Number(r.amount) || 0).toLocaleString()}`;
-    if (r.type === 'REPORT') return `${r.targetDate || '-'} · ${r.reason || ''}`;
-    if (r.type === 'SUB_NOTI' || r.type === 'SUB_REQUEST') return `대상일: ${r.targetDate || '-'} · ${r.targetStartTime || ''} ~ ${r.targetEndTime || ''}`;
+    if (r.type === 'UNSCHEDULED_WORK') {
+      // 요청 일시는 상단 meta에서 날짜+시간으로 표시하므로, 여기서는 사유만 노출
+      const reason = r.reason || '-';
+      return `사유: ${reason}`;
+    }
+
+    if (r.type === 'LOG') {
+      let base = `수정 희망: ${r.newStartTime || '-'} ~ ${r.newEndTime || '(중)'}`;
+      if (r.reason) base += ` · 사유: ${r.reason}`;
+      return base;
+    }
+
+    if (r.type === 'EXPENSE') {
+      // 날짜·카테고리·금액은 여기서, 사유는 하단 expenseMetaRow에서 별도 노출
+      return `${r.targetDate || '-'} · ${r.category || '기타'} · ₩${(Number(r.amount) || 0).toLocaleString()}`;
+    }
+
+    if (r.type === 'REPORT') {
+      return `${r.targetDate || '-'} · ${r.reason || ''}`;
+    }
+
+    if (r.type === 'SUB_NOTI' || r.type === 'SUB_REQUEST') {
+      let base = `대상일: ${r.targetDate || '-'} · ${r.targetStartTime || ''} ~ ${r.targetEndTime || ''}`;
+      if (r.reason) base += ` · 사유: ${r.reason}`;
+      return base;
+    }
+
     return r.reason || '';
   };
 
@@ -69,7 +140,7 @@ export default function NotificationCenter({
       {open && (
         <>
           <div style={backdrop} onClick={() => setOpen(false)} aria-hidden="true" />
-          <div style={panel}>
+          <div style={isPhone ? panelMobile : panel}>
             <div style={panelHeader}>
               <span style={panelTitle}>승인 요청</span>
               <div style={headerActions}>
@@ -91,7 +162,9 @@ export default function NotificationCenter({
                   requests.map(req => (
                     <div key={req.id} style={card}>
                       <div style={cardTitle}>{getReqLabel(req)}</div>
-                      {req.requestDate && <div style={cardMeta}>요청 일시: {req.requestDate}</div>}
+                      {req.requestDate && (
+                        <div style={cardMeta}>요청 일시: {formatKoreanDateTime(req.requestDate)}</div>
+                      )}
                       <div style={cardReason}>{getReqDetail(req) || req.reason}</div>
                       {req.type === 'EXPENSE' && (
                         <div style={expenseMetaRow}>
@@ -139,7 +212,9 @@ export default function NotificationCenter({
                 requestArchive.map((archived, idx) => (
                   <div key={archived.processedAt + '-' + (archived.id ?? idx)} style={card}>
                     <div style={cardTitle}>{getReqLabel(archived)}</div>
-                    {archived.requestDate && <div style={cardMeta}>요청 일시: {archived.requestDate}</div>}
+                    {archived.requestDate && (
+                      <div style={cardMeta}>요청 일시: {formatKoreanDateTime(archived.requestDate)}</div>
+                    )}
                     <div style={cardReason}>{getReqDetail(archived) || archived.reason}</div>
                     {archived.type === 'EXPENSE' && (
                       <div style={expenseMetaRow}>
@@ -195,13 +270,8 @@ const badge: React.CSSProperties = {
   padding: '0 4px'
 };
 const backdrop: React.CSSProperties = { position: 'fixed', inset: 0, zIndex: 999 };
-const panel: React.CSSProperties = {
-  position: 'absolute',
-  top: '100%',
-  right: 0,
-  marginTop: 8,
-  width: '360px',
-  maxHeight: '70vh',
+
+const panelBase: React.CSSProperties = {
   background: '#1c1c1e',
   border: '1px solid rgba(255,255,255,0.1)',
   borderRadius: '16px',
@@ -210,6 +280,26 @@ const panel: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   overflow: 'hidden'
+};
+const panel: React.CSSProperties = {
+  ...panelBase,
+  position: 'absolute',
+  top: '100%',
+  right: 0,
+  marginTop: 8,
+  width: '360px',
+  maxHeight: '70vh',
+};
+const panelMobile: React.CSSProperties = {
+  ...panelBase,
+  position: 'fixed',
+  top: 64,
+  left: 0,
+  right: 0,
+  margin: '0 10px',
+  width: 'auto',
+  maxWidth: '100%',
+  maxHeight: '80vh',
 };
 const panelHeader: React.CSSProperties = {
   display: 'flex',
@@ -234,9 +324,19 @@ const card: React.CSSProperties = {
   marginBottom: '10px',
   border: '1px solid rgba(255,255,255,0.06)'
 };
-const cardTitle: React.CSSProperties = { fontSize: '13px', fontWeight: '600', color: '#fff', marginBottom: '4px' };
+const cardTitle: React.CSSProperties = {
+  fontSize: '14px',
+  fontWeight: '700',
+  color: '#f9fafb',
+  marginBottom: '6px'
+};
 const cardMeta: React.CSSProperties = { fontSize: '11px', color: '#666', marginBottom: '4px' };
-const cardReason: React.CSSProperties = { fontSize: '12px', color: '#888', marginBottom: '10px' };
+const cardReason: React.CSSProperties = {
+  fontSize: '12px',
+  color: '#e5e7eb',
+  marginBottom: '10px',
+  lineHeight: 1.5
+};
 const expenseMetaRow: React.CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '10px' };
 const expenseReasonText: React.CSSProperties = { fontSize: '12px', color: '#a1a1aa', flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
 const receiptBtn: React.CSSProperties = { background: 'rgba(10,132,255,0.16)', border: '1px solid #0a84ff', color: '#9cc9ff', padding: '6px 10px', borderRadius: '8px', fontSize: '11px', fontWeight: 700, cursor: 'pointer', flexShrink: 0 };

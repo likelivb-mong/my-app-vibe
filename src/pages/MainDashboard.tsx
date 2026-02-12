@@ -89,17 +89,8 @@ const MainDashboard: React.FC<MainDashboardProps> = ({ onLogout }) => {
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
-  const getWorkerStatusBadges = (worker: any) => {
-    const badges = [];
-    if (worker.isSub) badges.push({ text: '대타', color: '#a855f7' }); 
-    if (worker.isUnscheduled) badges.push({ text: '스케줄외', color: '#3b82f6' }); 
-    if (worker.isNoShowLate) badges.push({ text: '무단지각', color: '#f97316' });
-    if (worker.isLate) badges.push({ text: '지각', color: '#ef4444' }); 
-    return badges;
-  };
-
   const getMobilePriorityNameColor = (worker: any, fallback: string) => {
-    // 모바일 폭에서는 뱃지 대신 이름 색으로 상태 우선순위를 빠르게 인지
+    // 좁은 카드(모바일/작은 지점 카드)에서는 뱃지 대신 이름 색으로 상태 우선순위를 빠르게 인지
     if (worker.isLate) return '#ef4444';
     if (worker.isUnscheduled) return '#3b82f6';
     return fallback;
@@ -119,24 +110,19 @@ const MainDashboard: React.FC<MainDashboardProps> = ({ onLogout }) => {
     return `${String(nums[0]).padStart(2, '0')}:${String(nums[1]).padStart(2, '0')}`;
   };
 
-  const getTodayPlannedShift = (crew: any) => {
-    const now = new Date();
-    const todayStr = now.toLocaleDateString('en-CA');
-    const dayOfWeek = now.getDay();
-    const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const getPlannedShiftForDate = (crew: any, targetDate: Date) => {
+    const dateStr = targetDate.toLocaleDateString('en-CA');
+    const dayOfWeek = targetDate.getDay();
+    const monthKey = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}`;
 
     const sameDayOneOffs = oneOffShifts
       .filter(
         (s: any) =>
-          s?.date === todayStr &&
+          s?.date === dateStr &&
           s?.crewName === crew?.name &&
           s?.branchCode === crew?.branchCode
       )
       .sort((a: any, b: any) => (Number(b.id) || 0) - (Number(a.id) || 0));
-
-    const hasOff = sameDayOneOffs.some((s: any) => s?.type === 'OFF');
-    if (hasOff) return null;
-
     const oneOff = sameDayOneOffs.find((s: any) => s?.type !== 'OFF');
     if (oneOff?.startTime && oneOff?.endTime) {
       return { startTime: oneOff.startTime, endTime: oneOff.endTime };
@@ -152,14 +138,19 @@ const MainDashboard: React.FC<MainDashboardProps> = ({ onLogout }) => {
     return null;
   };
 
-  const getBranchDailyRows = (branchCode: string) => {
+  const getBranchDailyRows = (branchCode: string, targetDate: Date) => {
+    const targetStr = targetDate.toLocaleDateString('en-CA');
     const todayStr = new Date().toLocaleDateString('en-CA');
-    const active = workingCrews
-      .filter((c: any) => c.branchCode === branchCode)
-      .map((c: any) => ({ ...c, isActive: true, statusType: 'active', sortTs: Number(c.timestamp) || 0 }));
+    const isToday = targetStr === todayStr;
+
+    const active = isToday
+      ? workingCrews
+          .filter((c: any) => c.branchCode === branchCode)
+          .map((c: any) => ({ ...c, isActive: true, statusType: 'active', sortTs: Number(c.timestamp) || 0 }))
+      : [];
 
     const finished = attendanceLogs
-      .filter((l: any) => l.branchCode === branchCode && l.type === 'OUT' && l.date === todayStr)
+      .filter((l: any) => l.branchCode === branchCode && l.type === 'OUT' && l.date === targetStr)
       .map((l: any) => {
         const ts = new Date(`${l.date}T${String(l.startTime || '00:00:00')}`).getTime();
         return {
@@ -181,9 +172,9 @@ const MainDashboard: React.FC<MainDashboardProps> = ({ onLogout }) => {
     const planned = allCrews
       .filter((crew: any) => crew?.branchCode === branchCode)
       .map((crew: any) => {
-        const schedule = getTodayPlannedShift(crew);
+        const schedule = getPlannedShiftForDate(crew, targetDate);
         if (!schedule) return null;
-        const ts = new Date(`${todayStr}T${String(schedule.startTime || '00:00:00')}`).getTime();
+        const ts = new Date(`${targetStr}T${String(schedule.startTime || '00:00:00')}`).getTime();
         return {
           name: crew.name,
           pin: crew.pin,
@@ -238,39 +229,53 @@ const MainDashboard: React.FC<MainDashboardProps> = ({ onLogout }) => {
 
   const crewDetailLogs = selectedCrewDetail ? (() => {
     const allLogs = JSON.parse(localStorage.getItem('attendance_logs') || '[]') as any[];
-    let list = allLogs.filter((l: any) => l.userPin === selectedCrewDetail.pin && (l.type === 'OUT' || l.type === 'ABSENT'));
-    const workingCrews = JSON.parse(localStorage.getItem('working_crews') || '{}');
-    const activeShift = workingCrews[selectedCrewDetail.pin];
-    const todayStr = new Date().toLocaleDateString('en-CA');
-    const isActuallyWorkingNow = (() => {
-      try {
-        const phone = selectedCrewDetail?.phone;
-        if (!phone) return false;
-        const raw = localStorage.getItem(`work_status_${phone}`);
-        if (!raw) return false;
-        const parsed = JSON.parse(raw);
-        return !!parsed?.working;
-      } catch (_) {
-        return false;
-      }
-    })();
-    if (activeShift && isActuallyWorkingNow) {
-      const activeDate = new Date(activeShift.timestamp).toLocaleDateString('en-CA');
-      // 과거에 남은 stale 근무중 데이터가 상세 기록을 덮어쓰지 않도록 오늘 데이터만 근무중으로 표시
-      if (activeDate === todayStr && activeDate.startsWith(detailTargetMonth)) {
-        list = list.filter((l: any) => l.date !== activeDate);
-        list.push({
-          id: 'active_now', userPin: selectedCrewDetail.pin, userName: selectedCrewDetail.name, type: 'IN',
-          date: activeDate, startTime: activeShift.startTime, endTime: '', totalWorkTime: '00:00:00',
-          timestamp: Number(activeShift.timestamp) || Date.now(),
-          isLate: activeShift.isLate, isNoShowLate: activeShift.isNoShowLate, isUnscheduled: activeShift.isUnscheduled, isSub: activeShift.isSub
-        });
-      }
-    }
-    list = list.filter((l: any) => (l.date || '').startsWith(detailTargetMonth));
-    list.sort((a: any, b: any) => (b.date || '').localeCompare(a.date || ''));
+    const pinStr = String(selectedCrewDetail.pin || '');
+    const nameStr = String(selectedCrewDetail.name || '').trim();
+    const branchStr = String(selectedCrewDetail.branchCode || '');
+    const monthStr = String(detailTargetMonth || '');
+
+    const normMonth = (d: any) => String(d || '').replace(/\//g, '-').slice(0, 7);
+    const normDateFull = (d: any) => String(d || '').replace(/\//g, '-').slice(0, 10);
+
+    const matchCrew = (l: any) =>
+      (pinStr && String(l.userPin || '').trim() === pinStr) ||
+      (nameStr && branchStr && String(l.userName || '').trim() === nameStr && String(l.branchCode || '').trim() === branchStr);
+
+    // 이달 전체 근무 기록만 필터 (삭제·치환 없음 → 근무중이어도 지난 내역 모두 유지)
+    const list = allLogs.filter((l: any) => {
+      if (!matchCrew(l)) return false;
+      const lm = normMonth(l.date);
+      if (!monthStr || lm !== monthStr) return false;
+      const t = l.type;
+      return t === 'OUT' || t === 'ABSENT' || t === 'IN' || !t;
+    });
+
+    const getSortKey = (log: any) => {
+      const d = String(log.date || '').replace(/\//g, '-');
+      const t = formatHM(log.startTime || '');
+      return `${d} ${t}`;
+    };
+    list.sort((a: any, b: any) => getSortKey(b).localeCompare(getSortKey(a)));
     return list;
   })() : [];
+
+  // 근무 상세에서 '지금 근무중'인 행 판별용 (목록은 항상 이달 전체, 표시만 근무중/종료 구분)
+  const detailWorkingState = selectedCrewDetail ? (() => {
+    const workingCrews = JSON.parse(localStorage.getItem('working_crews') || '{}');
+    const activeShift = workingCrews[selectedCrewDetail.pin];
+    let isActuallyWorking = false;
+    try {
+      const phone = selectedCrewDetail?.phone;
+      if (phone) {
+        const raw = localStorage.getItem(`work_status_${phone}`);
+        if (raw) isActuallyWorking = !!JSON.parse(raw)?.working;
+      }
+    } catch (_) {}
+    const todayNorm = activeShift
+      ? String(new Date(activeShift.timestamp).toLocaleDateString('en-CA')).replace(/\//g, '-').slice(0, 10)
+      : '';
+    return { activeShift, isActuallyWorking, todayNorm };
+  })() : null;
 
   const crewDetailPaySummary = selectedCrewDetail && crewDetailLogs.length > 0 ? (() => {
     const holidaysMap = JSON.parse(localStorage.getItem('company_holidays_map') || '{}');
@@ -427,6 +432,8 @@ const MainDashboard: React.FC<MainDashboardProps> = ({ onLogout }) => {
       if (isApproved) {
         const now = Date.now();
         const startTimeStr = new Date(now).toLocaleTimeString('ko-KR', { hour12: false });
+        const dateStr = (req.targetDate || new Date().toLocaleDateString('en-CA'));
+
         const workingCrews = JSON.parse(localStorage.getItem('working_crews') || '{}');
         workingCrews[req.reqPin] = {
           name: req.reqName,
@@ -439,11 +446,36 @@ const MainDashboard: React.FC<MainDashboardProps> = ({ onLogout }) => {
         };
         localStorage.setItem('working_crews', JSON.stringify(workingCrews));
 
-        // ✅ CrewHome에서 바로 근무 시작 상태로 보이도록 work_status도 함께 세팅
-        const crew = allCrews.find((c: any) => c.pin === req.reqPin);
-        if (crew?.phone) {
+        // ✅ 출근 기록을 attendance_logs에 IN으로 저장 (근무 기록에 반영)
+        const logs = JSON.parse(localStorage.getItem('attendance_logs') || '[]');
+        logs.push({
+          id: 'unscheduled_in_' + now,
+          userName: req.reqName,
+          userPin: req.reqPin,
+          branchCode: req.branchCode,
+          type: 'IN',
+          date: dateStr,
+          startTime: startTimeStr,
+          endTime: '',
+          totalWorkTime: '00:00:00',
+          timestamp: now,
+          isUnscheduled: true,
+          isLate: false,
+          isNoShowLate: false,
+          isSub: false
+        });
+        localStorage.setItem('attendance_logs', JSON.stringify(logs));
+
+        // ✅ CrewHome에서 근무 시작으로 보이도록 work_status 세팅 (allCrews 또는 localStorage에서 전화번호 조회)
+        let phone: string | undefined = allCrews.find((c: any) => c.pin === req.reqPin)?.phone;
+        if (!phone) {
+          const crewKey = `crew_pin_${req.branchCode}_${req.reqName}`;
+          const crewData = JSON.parse(localStorage.getItem(crewKey) || '{}');
+          phone = crewData.phone;
+        }
+        if (phone) {
           localStorage.setItem(
-            `work_status_${crew.phone}`,
+            `work_status_${phone}`,
             JSON.stringify({ start: now, working: true, isLate: false, isUnscheduled: true })
           );
         }
@@ -618,20 +650,51 @@ const MainDashboard: React.FC<MainDashboardProps> = ({ onLogout }) => {
   };
 
   const isMobileMgmt = viewportWidth <= 560;
+  const isNarrowStatusCard = viewportWidth <= 480;
+  // 지점 카드 폭 기반으로 크루 한 줄이 좁아지는지 대략 계산 (브랜치 개수로 나눈 값 사용)
+  const approxBranchCardWidth = viewportWidth / BRANCHES.length;
+  const isCompactBranchRow = approxBranchCardWidth <= 260; // 카드 하나가 260px 이하로 줄어들면 컴팩트 모드
+
+  // 대시보드 상단에서 전체 지점 기준으로 볼 날짜 (기본: 오늘)
+  const [dashboardDate, setDashboardDate] = useState<Date>(() => new Date());
+  const todayStr = new Date().toLocaleDateString('en-CA');
+  const dashboardDateKey = dashboardDate.toLocaleDateString('en-CA');
+  const isDashboardToday = dashboardDateKey === todayStr;
+  // 전 지점 기준 "실시간" 근무 인원
+  // - 오늘: 현재 근무중(workingCrews)인 크루 수
+  // - 과거/미래 날짜: 실시간 개념이 없으므로 0명
+  const totalWorkersForDashboardDate = (() => {
+    if (!isDashboardToday) return 0;
+    const pins = new Set<string>();
+    (workingCrews || []).forEach((c: any) => {
+      if (c?.pin) pins.add(String(c.pin));
+    });
+    return pins.size;
+  })();
+
+  const changeDashboardDate = (deltaDays: number) => {
+    setDashboardDate(prev => {
+      const next = new Date(prev);
+      next.setDate(prev.getDate() + deltaDays);
+      return next;
+    });
+  };
   const managementGridStyle: React.CSSProperties = {
     ...managementGrid,
     gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-    gap: isMobileMgmt ? '8px' : managementGrid.gap
+    gap: isMobileMgmt ? '8px' : managementGrid.gap,
   };
+  const isWideViewport = viewportWidth >= 558;
   const mgmtCardStyle: React.CSSProperties = {
     ...mgmtCard,
-    minHeight: isMobileMgmt ? '96px' : '76px',
-    padding: isMobileMgmt ? '10px 6px' : mgmtCard.padding,
-    gap: isMobileMgmt ? '8px' : mgmtCard.gap,
+    minHeight: isMobileMgmt ? '88px' : isWideViewport ? '56px' : '66px',
+    ...(isWideViewport ? { height: '56px', aspectRatio: 'auto' as const } : { aspectRatio: '1 / 1' as const }),
+    padding: isMobileMgmt ? '8px 4px' : mgmtCard.padding,
+    gap: isMobileMgmt ? '6px' : mgmtCard.gap,
     flexDirection: isMobileMgmt ? 'column' : 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    textAlign: 'center'
+    textAlign: 'center',
   };
   const mgmtIconBadgeStyle: React.CSSProperties = {
     ...mgmtIconBadge,
@@ -662,7 +725,7 @@ const MainDashboard: React.FC<MainDashboardProps> = ({ onLogout }) => {
       <div style={topHeader}>
         <div style={titleGroup}>
           <h1 style={logoText}>지점별 실시간 현황</h1>
-          <span style={logoSubText}>Live Store Dashboard</span>
+          <span style={timeDisplay}>{currentTime.toLocaleString('ko-KR')}</span>
         </div>
         <div style={headerRight}>
           <NotificationCenter 
@@ -678,6 +741,8 @@ const MainDashboard: React.FC<MainDashboardProps> = ({ onLogout }) => {
         />
         </div>
       </div>
+
+      <div style={divider} />
 
       <div style={managementGridStyle}>
         <button onClick={() => window.location.hash = '#pay-stub'} style={mgmtCardStyle}>
@@ -708,32 +773,214 @@ const MainDashboard: React.FC<MainDashboardProps> = ({ onLogout }) => {
         </button>
       </div>
 
-      <div style={divider} />
+      {/* 조회 기준일 카드 (급여 대장 상단 카드 스타일) */}
+      <div
+        style={{
+          background: 'linear-gradient(135deg, rgba(15,23,42,0.95), rgba(30,64,175,0.85))',
+          borderRadius: 24,
+          padding: isNarrowStatusCard ? '12px 14px 14px' : '18px 20px',
+          border: '1px solid rgba(129,140,248,0.35)',
+          display: 'flex',
+          flexDirection: isNarrowStatusCard ? 'column' : 'row',
+          alignItems: isNarrowStatusCard ? 'flex-start' : 'center',
+          justifyContent: 'space-between',
+          gap: isNarrowStatusCard ? 10 : 18,
+          marginBottom: 26,
+          boxShadow: '0 18px 40px rgba(15,23,42,0.65)',
+          width: '100%',
+          boxSizing: 'border-box',
+        }}
+      >
+        {isNarrowStatusCard ? (
+          <>
+            {/* 모바일: 첫 줄에 조회 기준일 + 전 지점 현 근무자 N명, 둘째 줄에 날짜 선택 */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                width: '100%',
+                gap: 8,
+              }}
+            >
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  letterSpacing: '0.16em',
+                  textTransform: 'uppercase',
+                  color: '#bfdbfe',
+                }}
+              >
+                조회 기준일
+              </span>
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: '#e5e7eb',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                전 지점 현 근무자 {totalWorkersForDashboardDate.toLocaleString()}명
+              </span>
+            </div>
+            <div
+              style={{
+                marginTop: 8,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 8,
+                width: '100%',
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => changeDashboardDate(-1)}
+                style={dateNavBtn}
+                aria-label="전날"
+              >
+                <span style={dateNavChevron}>‹</span>
+              </button>
+              <div style={{ ...dateSegmentGroup, flexShrink: 1, minWidth: 0 }}>
+                <input
+                  type="text"
+                  value={dashboardDate.toLocaleDateString('ko-KR').replace(/\s/g, ' ')}
+                  readOnly
+                  style={{ ...dateInput, textAlign: 'center' }}
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => changeDashboardDate(1)}
+                style={dateNavBtn}
+                aria-label="다음날"
+              >
+                <span style={dateNavChevron}>›</span>
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            {/* 데스크톱: 좌측 조회 기준일 + 날짜, 우측 전 지점 현 근무자/선택일 근무 인원 */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 1, minWidth: 0 }}>
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  letterSpacing: '0.16em',
+                  textTransform: 'uppercase',
+                  color: '#bfdbfe',
+                }}
+              >
+                조회 기준일
+              </span>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  flexWrap: 'nowrap',
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => changeDashboardDate(-1)}
+                  style={dateNavBtn}
+                  aria-label="전날"
+                >
+                  <span style={dateNavChevron}>‹</span>
+                </button>
+                <div style={dateSegmentGroup}>
+                  <input
+                    type="text"
+                    value={dashboardDate.toLocaleDateString('ko-KR').replace(/\s/g, ' ')}
+                    readOnly
+                    style={dateInput}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => changeDashboardDate(1)}
+                  style={dateNavBtn}
+                  aria-label="다음날"
+                >
+                  <span style={dateNavChevron}>›</span>
+                </button>
+              </div>
+            </div>
+            <div
+              style={{
+                width: 1,
+                height: 40,
+                background: 'rgba(191,219,254,0.45)',
+                flexShrink: 0,
+              }}
+            />
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'flex-end',
+                gap: 4,
+                flexShrink: 0,
+              }}
+            >
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  letterSpacing: '0.12em',
+                  textTransform: 'uppercase',
+                  color: '#d1d5db',
+                }}
+              >
+                {isDashboardToday ? '전 지점 현 근무자' : '선택일 근무 인원'}
+              </span>
+              <span
+                style={{
+                  fontSize: 22,
+                  fontWeight: 800,
+                  color: '#f9fafb',
+                }}
+              >
+                {totalWorkersForDashboardDate.toLocaleString()}명
+              </span>
+            </div>
+          </>
+        )}
+      </div>
 
       <div style={branchSectionWrap}>
-        <div style={{ ...timeDisplay, marginBottom: '12px' }}>{currentTime.toLocaleString('ko-KR')}</div>
         <div style={gridContainer}>
         {BRANCHES.map(branch => (
           <div key={branch.code} style={branchCard}>
             <div style={branchCardHeader}>
-              <h3 style={branchTitle}>{branch.label}</h3>
+              <div style={branchTitleWrap}>
+                <h3 style={branchTitle}>{branch.label}</h3>
+                <span style={branchCode}>{branch.code}</span>
+              </div>
                 <button onClick={() => setSelectedBranchCal(branch.label)} style={calBtn}>📅 월간 스케줄</button>
             </div>
             <div style={crewList}>
               {(() => {
-                const branchRows = getBranchDailyRows(branch.code);
+                const branchRows = getBranchDailyRows(branch.code, dashboardDate);
                 return (
                   <>
                     {branchRows.map((crew: any, idx: number) => {
-                      const isMobileCompact = viewportWidth <= 560;
+                      // 카드 폭이 좁을 때(=지점 칸이 작아질 때)는 모바일과 동일하게 이름 색상만으로 상태 표시
+                      const isMobileCompact = viewportWidth <= 560 || isCompactBranchRow;
                       const isActive = crew.statusType === 'active';
                       const isFinished = crew.statusType === 'finished';
                       const isScheduled = crew.statusType === 'scheduled';
                       const rowOpacity = isActive ? 1 : isFinished ? 0.92 : 0.62;
                       const rowBg = isActive ? 'rgba(255,255,255,0.03)' : isFinished ? 'rgba(255,255,255,0.07)' : 'rgba(255,255,255,0.02)';
-                      const baseNameColor = isActive ? '#ffffff' : isFinished ? '#e5e7eb' : '#9ca3af';
-                      const nameColor = isMobileCompact ? getMobilePriorityNameColor(crew, baseNameColor) : baseNameColor;
-                      const timeColor = isActive ? '#cbd5e1' : isFinished ? '#e5e7eb' : '#9ca3af';
+                      const baseNameColor = isActive ? '#ffffff' : isFinished ? '#6b7280' : '#9ca3af';
+                      const nameColor = isMobileCompact
+                        ? (isFinished ? baseNameColor : getMobilePriorityNameColor(crew, baseNameColor))
+                        : baseNameColor;
+                      const timeColor = isActive ? '#cbd5e1' : isFinished ? '#6b7280' : '#9ca3af';
                       const dotColor = isActive ? '#32d74b' : isFinished ? '#d1d5db' : '#6b7280';
                       const dotShadow = isActive ? '0 0 8px #32d74b' : 'none';
                       const statusLabel = isActive ? '출근' : isScheduled ? '예정' : '퇴근';
@@ -743,7 +990,7 @@ const MainDashboard: React.FC<MainDashboardProps> = ({ onLogout }) => {
                       const workedHHMM = isActive
                         ? getElapsedTime(crew.timestamp)
                         : (String(crew.totalWorkTime || '').match(/\d+/g)?.slice(0, 2).map((n: string) => String(Number(n)).padStart(2, '0')).join(':') || '--:--');
-                      const timerColor = isActive ? '#facc15' : isFinished ? '#e5e7eb' : '#6b7280';
+                      const timerColor = isActive ? '#facc15' : isFinished ? '#6b7280' : '#6b7280';
 
                       return (
                         <div
@@ -826,22 +1073,67 @@ const MainDashboard: React.FC<MainDashboardProps> = ({ onLogout }) => {
                 </div>
               )}
               <div style={detailSectionTitle}>근무 기록 내역</div>
-              {crewDetailLogs.length === 0 ? (
-                <p style={emptyText}>해당 월 근무 기록이 없습니다.</p>
-              ) : (
-                <ul style={detailList}>
-                  {crewDetailLogs.map((log: any, i: number) => {
-                    const day = String(log.date || '').split('-')[2] || '';
+              {(() => {
+                const isErrorRecord = (log: any) => {
+                  if (log.type === 'IN') {
+                    const logDateNorm = String(log.date || '').replace(/\//g, '-').slice(0, 10);
+                    const activeTs = detailWorkingState?.activeShift ? Number(detailWorkingState.activeShift.timestamp) : 0;
+                    const activeStart = detailWorkingState?.activeShift?.startTime ?? '';
+                    const isActiveNow =
+                      !!detailWorkingState?.activeShift &&
+                      detailWorkingState.isActuallyWorking &&
+                      logDateNorm === detailWorkingState.todayNorm &&
+                      (Number(log.timestamp) === activeTs || String(log.startTime || '') === String(activeStart));
+                    if (isActiveNow) return false;
+                    const tw = String(log.totalWorkTime ?? '').trim();
+                    const zeroDuration = !tw || tw === '-' || tw === '00:00' || tw === '00:00:00' || /^0+:0*$/.test(tw.replace(/:/g, ':'));
+                    if (zeroDuration) return true;
+                    if (String(log.startTime || '') === String(log.endTime || '') && zeroDuration) return true;
+                    return false;
+                  }
+                  const tw = String(log.totalWorkTime ?? '').trim();
+                  const zeroDuration = !tw || tw === '-' || tw === '00:00' || /^0+:0*$/.test(tw.replace(/:/g, ':'));
+                  if (zeroDuration && String(log.startTime || '') === String(log.endTime || '')) return true;
+                  return false;
+                };
+                const displayList = crewDetailLogs.filter((log: any) => !isErrorRecord(log));
+                const errorCount = crewDetailLogs.length - displayList.length;
+                return (
+                  <>
+                    {errorCount > 0 && (
+                      <div style={detailErrorNotice}>
+                        오류·중복으로 인해 {errorCount}건의 기록이 목록에서 제외되었습니다. 월급여 명세서와 불일치 시 관리자에게 문의해 주세요.
+                      </div>
+                    )}
+                    {displayList.length === 0 ? (
+                      <p style={emptyText}>해당 월 근무 기록이 없습니다.</p>
+                    ) : (
+                      <ul style={detailList}>
+                        {displayList.map((log: any, i: number) => {
+                          const day = String(log.date || '').split('-')[2] || '';
+                          const logDateNorm = String(log.date || '').replace(/\//g, '-').slice(0, 10);
+                          const activeTs = detailWorkingState?.activeShift ? Number(detailWorkingState.activeShift.timestamp) : 0;
+                          const activeStart = detailWorkingState?.activeShift?.startTime ?? '';
+                          const isActiveNow =
+                            log.type === 'IN' &&
+                            !!detailWorkingState?.activeShift &&
+                            detailWorkingState.isActuallyWorking &&
+                            logDateNorm === detailWorkingState.todayNorm &&
+                            (Number(log.timestamp) === activeTs || String(log.startTime || '') === String(activeStart));
                     const timeText =
                       log.type === 'IN'
-                        ? `${formatHM(log.startTime)} ~ (근무중)`
+                        ? isActiveNow
+                          ? `${formatHM(log.startTime)} ~ (근무중)`
+                          : `${formatHM(log.startTime)} ~ (종료)`
                         : log.type === 'ABSENT'
                           ? '-'
                           : `${formatHM(log.startTime)} ~ ${log.endTime ? formatHM(log.endTime) : '-'}`;
-                    const totalHHMM =
-                      log.type === 'IN' && Number(log.timestamp) > 0
-                        ? getElapsedTime(Number(log.timestamp))
-                        : (String(log.totalWorkTime || '-').match(/\d+/g)?.slice(0, 2).map((n: string) => String(Number(n)).padStart(2, '0')).join(':') || '-');
+                    const elapsedTs = isActiveNow && detailWorkingState?.activeShift
+                      ? Number(detailWorkingState.activeShift.timestamp) || 0
+                      : Number(log.timestamp) || 0;
+                    const totalHHMM = isActiveNow
+                      ? getElapsedTime(elapsedTs)
+                      : (String(log.totalWorkTime || '-').match(/\d+/g)?.slice(0, 2).map((n: string) => String(Number(n)).padStart(2, '0')).join(':') || '-');
                     const badges = [];
                     if (log.type === 'ABSENT') badges.push({ text: '무단 결근', style: { ...detailBadge, background: 'rgba(127,29,29,0.25)', color: '#f87171' } });
                     if (log.isNoShowLate) badges.push({ text: '무단 지각', style: { ...detailBadge, background: 'rgba(249,115,22,0.2)', color: '#fb923c' } });
@@ -860,12 +1152,21 @@ const MainDashboard: React.FC<MainDashboardProps> = ({ onLogout }) => {
                             ))}
                           </div>
                         </div>
-                        <span style={detailTotal}>{totalHHMM}</span>
+                        <span style={{ 
+                          ...detailTotal,
+                          // 근무중이 아닌 기록(퇴근 완료 등): 누적 시간 하얀색 / 실시간 근무중만 노란색
+                          color: isActiveNow ? '#facc15' : '#fff'
+                        }}>
+                          {totalHHMM}
+                        </span>
                       </li>
                     );
                   })}
                 </ul>
-              )}
+                    )}
+                  </>
+                );
+              })()}
               <button type="button" onClick={openPayStubForCrew} style={detailPayStubBtn}>월급여 명세서에서 보기</button>
             </div>
           </div>
@@ -880,16 +1181,29 @@ const pageWrapper: React.CSSProperties = {
   background: '#000', minHeight: '100vh', padding: '20px 30px 60px', color: '#fff',
   fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif'
 };
-const topHeader: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' };
-const titleGroup: React.CSSProperties = { display: 'flex', flexDirection: 'column' };
+const topHeader: React.CSSProperties = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  gap: '16px',
+  marginBottom: '16px',
+  flexWrap: 'wrap',
+};
+const titleGroup: React.CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '6px',
+  minWidth: 0,
+  flex: '1 1 auto',
+  justifyContent: 'center',
+};
 const headerRight: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 };
-const logoText: React.CSSProperties = { fontSize: '22px', fontWeight: '800', letterSpacing: '-0.5px', margin: 0, lineHeight: 1.15 };
-const logoSubText: React.CSSProperties = { color: '#8e8e93', fontSize: '11px', fontWeight: '600', marginTop: '5px', letterSpacing: '0.2px', lineHeight: 1.2 };
-const timeDisplay: React.CSSProperties = { color: '#888', fontSize: '13px', marginTop: 0 };
+const logoText: React.CSSProperties = { fontSize: '18px', fontWeight: '800', letterSpacing: '-0.5px', margin: 0, lineHeight: 1.2 };
+const timeDisplay: React.CSSProperties = { color: '#888', fontSize: '12px', margin: 0, lineHeight: 1.3 };
 const branchSectionWrap: React.CSSProperties = { marginTop: 0 };
 const logoutBtn: React.CSSProperties = { background: 'rgba(255,69,58,0.1)', border: 'none', color: '#ff453a', padding: '8px 15px', borderRadius: '12px', fontSize: '12px', fontWeight: '600', cursor: 'pointer' };
-const managementGrid: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '26px' };
-const mgmtCard: React.CSSProperties = { background: '#1c1c1e', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '16px', padding: '14px 15px', display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', textAlign: 'left', transition: 'transform 0.2s, background 0.2s' };
+const managementGrid: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px', marginBottom: '26px' };
+const mgmtCard: React.CSSProperties = { background: '#1c1c1e', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '16px', padding: '10px 10px', display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', textAlign: 'left', transition: 'transform 0.2s, background 0.2s' };
 const mgmtIconBadge: React.CSSProperties = { width: '30px', height: '30px', borderRadius: '8px', border: '1px solid rgba(148,163,184,0.55)', background: 'rgba(148,163,184,0.12)', color: '#cbd5e1', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 };
 const mgmtIconGlyph: React.CSSProperties = { fontSize: '15px', fontWeight: '700', lineHeight: 1 };
 const mgmtPersonIcon: React.CSSProperties = { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '2px', lineHeight: 1 };
@@ -898,11 +1212,82 @@ const mgmtPersonBody: React.CSSProperties = { width: '12px', height: '6px', bord
 const mgmtTextGroup: React.CSSProperties = { display: 'flex', flexDirection: 'column' };
 const mgmtMainText: React.CSSProperties = { fontSize: '14px', fontWeight: '700', color: '#fff' };
 const mgmtSubText: React.CSSProperties = { fontSize: '10px', color: '#8e8e93', marginTop: '2px' };
-const divider: React.CSSProperties = { height: '1px', background: 'rgba(255,255,255,0.1)', marginBottom: '30px' };
+const divider: React.CSSProperties = { height: '1px', background: 'rgba(255,255,255,0.1)', marginBottom: '12px' };
+
+// 날짜 선택 Apple 스타일
+const datePickerWrap: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: '10px',
+  marginBottom: '20px',
+};
+const dateNavBtn: React.CSSProperties = {
+  width: '36px',
+  height: '36px',
+  borderRadius: '50%',
+  border: '1px solid rgba(255,255,255,0.12)',
+  background: 'rgba(28,28,30,0.95)',
+  color: '#e5e7eb',
+  fontSize: '18px',
+  cursor: 'pointer',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  padding: 0,
+  transition: 'background 0.2s, border-color 0.2s',
+};
+const dateNavChevron: React.CSSProperties = { lineHeight: 1, fontWeight: 300 };
+const dateSegmentGroup: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  background: 'linear-gradient(135deg, rgba(31,41,55,0.95), rgba(15,23,42,0.95))',
+  border: '1px solid rgba(148,163,184,0.4)',
+  borderRadius: '999px',
+  overflow: 'hidden',
+  minHeight: '38px',
+  padding: '0 4px',
+  boxShadow: '0 8px 24px rgba(15,23,42,0.6)',
+};
+const dateInput: React.CSSProperties = {
+  background: 'transparent',
+  border: 'none',
+  padding: '4px 10px 4px 14px',
+  fontSize: '13px',
+  fontWeight: '600',
+  color: '#f5f5f7',
+  outline: 'none',
+  minWidth: '90px',
+};
+const dateSegmentDivider: React.CSSProperties = {
+  width: '1px',
+  height: '20px',
+  background: 'rgba(255,255,255,0.12)',
+  flexShrink: 0,
+};
+const dateTodayBtn: React.CSSProperties = {
+  border: 'none',
+  background: 'transparent',
+  padding: '6px 16px',
+  fontSize: '13px',
+  fontWeight: '600',
+  color: '#8e8e93',
+  cursor: 'pointer',
+  whiteSpace: 'nowrap',
+  transition: 'color 0.2s, background 0.2s',
+};
+const dateTodayBtnActive: React.CSSProperties = {
+  ...dateTodayBtn,
+  background: 'rgba(10,132,255,0.2)',
+  color: '#0a84ff',
+};
+
 const gridContainer: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px' };
 const branchCard: React.CSSProperties = { background: '#1c1c1e', borderRadius: '24px', padding: '24px', border: '1px solid rgba(255,255,255,0.05)', boxShadow: '0 10px 30px rgba(0,0,0,0.3)' };
 const branchCardHeader: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' };
-const branchTitle: React.CSSProperties = { color: '#fff', fontSize: '19px', fontWeight: '800' };
+const branchTitleWrap: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: '2px' };
+const branchTitle: React.CSSProperties = { color: '#fff', fontSize: '19px', fontWeight: '800', margin: 0 };
+const branchCode: React.CSSProperties = { color: '#8e8e93', fontSize: '11px', fontWeight: '600', letterSpacing: '0.04em' };
 const calBtn: React.CSSProperties = {
   background: 'linear-gradient(135deg, rgba(10,132,255,0.22) 0%, rgba(56,189,248,0.18) 100%)',
   border: '1px solid rgba(56,189,248,0.55)',
@@ -955,6 +1340,7 @@ const detailSummaryRow: React.CSSProperties = { display: 'flex', justifyContent:
 const detailSummaryLabel: React.CSSProperties = { color: '#888' };
 const detailSummaryValue: React.CSSProperties = { color: '#32d74b', fontWeight: '700', fontSize: '15px' };
 const detailSectionTitle: React.CSSProperties = { fontSize: '12px', fontWeight: '700', color: '#888', marginBottom: '10px', textTransform: 'uppercase' };
+const detailErrorNotice: React.CSSProperties = { background: 'rgba(255,149,0,0.15)', border: '1px solid rgba(255,149,0,0.4)', borderRadius: '10px', padding: '12px 14px', marginBottom: '14px', fontSize: '13px', color: '#ff9500', fontWeight: '500' };
 const detailPayStubBtn: React.CSSProperties = { width: '100%', marginTop: '16px', padding: '14px', background: '#0a84ff', border: 'none', borderRadius: '12px', color: '#fff', fontSize: '14px', fontWeight: '600', cursor: 'pointer' };
 
 export default MainDashboard;

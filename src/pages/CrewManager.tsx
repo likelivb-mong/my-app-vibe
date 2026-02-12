@@ -49,14 +49,41 @@ export default function CrewManager() {
   const [detail, setDetail] = useState<CombinedRecord | null>(null);
   const [isIdVisible, setIsIdVisible] = useState(false);
   const [isSettingOpen, setIsSettingOpen] = useState(false);
+  const [isIpamOpen, setIsIpamOpen] = useState(false);
+  const [ipamIps, setIpamIps] = useState<Record<string, string>>({});
+  const [ipamCustomBranches, setIpamCustomBranches] = useState<{ code: string; label: string }[]>([]);
+  const [ipamNewCode, setIpamNewCode] = useState('');
+  const [ipamNewLabel, setIpamNewLabel] = useState('');
   const [isBulkUploadOpen, setIsBulkUploadOpen] = useState(false);
   const [bulkUploadText, setBulkUploadText] = useState("");
+  const [isXynpAddOpen, setIsXynpAddOpen] = useState(false);
+  const [xynpAddName, setXynpAddName] = useState('');
+  const [xynpAddPhone, setXynpAddPhone] = useState('');
+  const [xynpAddPin, setXynpAddPin] = useState('');
   const [bulkPay, setBulkPay] = useState({ 
     basePay: 0, dutyAllowance: 0, incentiveAllowance: 0, specialAllowance: 0 
   });
 
   const loadData = () => {
     if (typeof localStorage === "undefined") return;
+
+    // 테스트용 크루 자동 생성 (한 번만): 지점코드 XYNP, PIN XC107
+    const testerKey = 'crew_pin_XYNP_테스터';
+    if (!localStorage.getItem(testerKey)) {
+      localStorage.removeItem('crew_pin_XC107_테스터'); // 이전 잘못 등록된 키 제거
+      const now = Date.now();
+      const tester = {
+        name: '테스터',
+        branchCode: 'XYNP',
+        phone: '01011112222',
+        status: 'active',
+        createdAt: now,
+        pin: 'XC107',
+        position: '크루',
+        hireDate: new Date().toISOString().slice(0, 10),
+      };
+      localStorage.setItem(testerKey, JSON.stringify(tester));
+    }
 
     const allKeys = Object.keys(localStorage);
     const crewKeys = allKeys.filter(key => key.startsWith('crew_pin_'));
@@ -430,9 +457,9 @@ export default function CrewManager() {
         <button onClick={() => { window.location.hash = "main-dashboard"; }} style={styles.btnBack}>
           ← 대시보드
         </button>
-        <div style={{ ...styles.navActions, marginLeft: "auto", justifyContent: "flex-end", flexWrap: "nowrap" }}>
-          {/* ✅ [수정] 버튼 문구 변경: ⚙️ Setup */}
+        <div style={{ ...styles.navActions, marginLeft: "auto", justifyContent: "flex-end", flexWrap: "nowrap", gap: "8px" }}>
           <button onClick={() => setIsSettingOpen(true)} style={styles.btnSetting}>⚙️ Setup</button>
+          <button onClick={() => { const saved = JSON.parse(localStorage.getItem('branch_allowed_ips') || '{}'); const custom = JSON.parse(localStorage.getItem('company_custom_branches') || '[]'); const next: Record<string, string> = {}; BRANCHES.forEach(b => { next[b.code] = saved[b.code] ?? b.allowedIp ?? ''; }); custom.forEach((c: { code: string; label: string }) => { next[c.code] = saved[c.code] ?? ''; }); setIpamIps(next); setIpamCustomBranches(custom); setIpamNewCode(''); setIpamNewLabel(''); setIsIpamOpen(true); }} style={styles.btnSetting}>📶 IPAM</button>
           <button onClick={() => window.location.hash = "#admin-issue"} style={styles.btnCreate}>
             + NEW PIN
           </button>
@@ -473,7 +500,7 @@ export default function CrewManager() {
           {/* Tabs + 슬라이드 안내 (폰에서 오른쪽 끝 표시) */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
             <div style={{ ...styles.tabRow, marginBottom: 0, flex: 1, minWidth: 0 }}>
-              {["ALL", ...BRANCHES.map(b => b.code), "TERMINATED"].map(tab => (
+              {["ALL", ...BRANCHES.map(b => b.code), "TERMINATED", "XYNP"].map(tab => (
                 <button key={tab} onClick={() => setActiveTab(tab)} style={{
                     ...styles.tabItem, 
                     background: activeTab === tab ? '#fff' : 'rgba(255,255,255,0.1)',
@@ -512,7 +539,7 @@ export default function CrewManager() {
               >
                 <div style={{...styles.tableCellCenter, color:'#aaa'}}>{crew.branchCode}</div>
                 <div style={styles.tableCellCenter}>
-                   <span style={{ fontWeight: '600', fontSize:'15px', color:'#fff' }}>{crew.name}</span>
+                   <span style={{ fontWeight: '600', fontSize:'14px', color:'#fff' }}>{crew.name}</span>
                 </div>
                 <div style={styles.tableCellCenter} onClick={(e) => e.stopPropagation()}>
                     {(crew.phone || crew.phoneLast4) ? (
@@ -545,11 +572,148 @@ export default function CrewManager() {
               </div>
             ))}
           </div>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '14px' }}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '10px', marginTop: '14px', flexWrap: 'wrap' }}>
+            {activeTab === 'XYNP' && (
+              <button onClick={() => { setXynpAddName(''); setXynpAddPhone(''); setXynpAddPin(''); setIsXynpAddOpen(true); }} style={styles.btnCreate}>+ 추가하기</button>
+            )}
             <button onClick={() => setIsBulkUploadOpen(true)} style={styles.btnBulkUpload}>일괄 업로드</button>
           </div>
         </div>
       </div>
+
+      {/* --- [모달] IP Address Management (IPAM) --- */}
+      {isIpamOpen && (
+        <div style={styles.overlay} onClick={() => setIsIpamOpen(false)}>
+          <div style={{ ...styles.modal, maxWidth: '560px' }} onClick={e => e.stopPropagation()}>
+            <h2 style={{ margin: '0 0 6px 0', fontSize: '20px', fontWeight: '700', color: '#fff' }}>📶 IP Address Management (IPAM)</h2>
+            <p style={{ margin: '0 0 16px 0', fontSize: '13px', color: '#9ca3af', lineHeight: 1.5 }}>
+              지점별 허용 IP를 등록하면, 해당 지점 크루는 그 IP(매장 Wi‑Fi)에서만 출근 버튼으로 근태 기록을 할 수 있습니다.
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '16px' }}>
+              {[...BRANCHES, ...ipamCustomBranches].map(b => (
+                <div key={b.code} style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                  <span style={{ minWidth: '52px', fontSize: '13px', fontWeight: '600', color: '#e5e7eb' }}>{b.code}</span>
+                  <span style={{ minWidth: '72px', fontSize: '12px', color: '#9ca3af' }}>{b.label}</span>
+                  <input
+                    type="text"
+                    placeholder="허용 IP (비우면 제한 없음)"
+                    value={ipamIps[b.code] ?? ''}
+                    onChange={e => setIpamIps(prev => ({ ...prev, [b.code]: e.target.value.trim() }))}
+                    style={{ ...styles.input, flex: 1, minWidth: '140px', fontFamily: 'monospace', fontSize: '13px' }}
+                  />
+                  {ipamCustomBranches.some(c => c.code === b.code) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = ipamCustomBranches.filter(c => c.code !== b.code);
+                        setIpamCustomBranches(next);
+                        localStorage.setItem('company_custom_branches', JSON.stringify(next));
+                        setIpamIps(prev => { const p = { ...prev }; delete p[b.code]; return p; });
+                      }}
+                      style={{ ...styles.btnClose, padding: '6px 10px', fontSize: '12px' }}
+                    >삭제</button>
+                  )}
+                </div>
+              ))}
+            </div>
+            <div style={{ borderTop: '1px solid rgba(255,255,255,0.12)', paddingTop: '16px', marginBottom: '20px' }}>
+              <div style={{ fontSize: '12px', fontWeight: '700', color: '#9ca3af', marginBottom: '10px' }}>지점 추가 등록</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <input
+                  type="text"
+                  placeholder="지점코드"
+                  value={ipamNewCode}
+                  onChange={e => setIpamNewCode(e.target.value.trim().toUpperCase())}
+                  style={{ ...styles.input, width: '90px', fontFamily: 'monospace' }}
+                />
+                <input
+                  type="text"
+                  placeholder="지점명"
+                  value={ipamNewLabel}
+                  onChange={e => setIpamNewLabel(e.target.value.trim())}
+                  style={{ ...styles.input, width: '120px' }}
+                />
+                <button
+                  type="button"
+                  style={styles.btnSave}
+                  onClick={() => {
+                    const code = ipamNewCode.trim();
+                    const label = ipamNewLabel.trim();
+                    if (!code || !label) { alert('지점코드와 지점명을 입력해 주세요.'); return; }
+                    const exists = BRANCHES.some(b => b.code === code) || ipamCustomBranches.some(c => c.code === code);
+                    if (exists) { alert('이미 등록된 지점코드입니다.'); return; }
+                    const next = [...ipamCustomBranches, { code, label }];
+                    setIpamCustomBranches(next);
+                    localStorage.setItem('company_custom_branches', JSON.stringify(next));
+                    setIpamIps(prev => ({ ...prev, [code]: '' }));
+                    setIpamNewCode(''); setIpamNewLabel('');
+                  }}
+                >추가</button>
+              </div>
+            </div>
+            <div style={styles.modalFooter}>
+              <button style={styles.btnSave} onClick={() => { localStorage.setItem('branch_allowed_ips', JSON.stringify(ipamIps)); alert('저장되었습니다.'); setIsIpamOpen(false); }}>저장</button>
+              <button style={styles.btnClose} onClick={() => setIsIpamOpen(false)}>취소</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- [모달] XYNP 크루 직접 등록 --- */}
+      {isXynpAddOpen && (
+        <div style={styles.overlay} onClick={() => setIsXynpAddOpen(false)}>
+          <div style={{ ...styles.modal, maxWidth: '400px' }} onClick={e => e.stopPropagation()}>
+            <h2 style={{ margin: '0 0 6px 0', fontSize: '18px', fontWeight: '700', color: '#fff' }}>XYNP 크루 등록</h2>
+            <p style={{ margin: '0 0 16px 0', fontSize: '13px', color: '#9ca3af' }}>이름, 전화번호, PIN만 입력하면 XYNP 지점 크루로 등록됩니다.</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '20px' }}>
+              <div style={styles.inputGroup}>
+                <small>이름</small>
+                <input type="text" placeholder="예: 홍길동" value={xynpAddName} onChange={e => setXynpAddName(e.target.value.trim())} style={styles.input} />
+              </div>
+              <div style={styles.inputGroup}>
+                <small>전화번호</small>
+                <input type="tel" placeholder="예: 01012345678" value={xynpAddPhone} onChange={e => setXynpAddPhone(e.target.value.replace(/\D/g, '').slice(0, 11))} style={styles.input} />
+              </div>
+              <div style={styles.inputGroup}>
+                <small>PIN 코드</small>
+                <input type="text" placeholder="로그인용 PIN" value={xynpAddPin} onChange={e => setXynpAddPin(e.target.value.trim())} style={styles.input} />
+              </div>
+            </div>
+            <div style={styles.modalFooter}>
+              <button
+                style={styles.btnSave}
+                onClick={() => {
+                  const name = xynpAddName.trim();
+                  const phone = xynpAddPhone.replace(/\D/g, '').trim();
+                  const pin = xynpAddPin.trim();
+                  if (!name) { alert('이름을 입력해 주세요.'); return; }
+                  if (!phone || phone.length < 10) { alert('전화번호를 올바르게 입력해 주세요.'); return; }
+                  if (!pin) { alert('PIN 코드를 입력해 주세요.'); return; }
+                  const key = `crew_pin_XYNP_${name}`;
+                  if (localStorage.getItem(key)) { alert('같은 이름의 크루가 이미 등록되어 있습니다.'); return; }
+                  const now = Date.now();
+                  const crew = {
+                    name,
+                    phone,
+                    pin,
+                    branchCode: 'XYNP',
+                    status: 'active',
+                    createdAt: now,
+                    position: '크루',
+                    hireDate: new Date().toISOString().slice(0, 10),
+                  };
+                  localStorage.setItem(key, JSON.stringify(crew));
+                  setXynpAddName(''); setXynpAddPhone(''); setXynpAddPin('');
+                  setIsXynpAddOpen(false);
+                  loadData();
+                  alert('등록되었습니다.');
+                }}
+              >등록</button>
+              <button style={styles.btnClose} onClick={() => setIsXynpAddOpen(false)}>취소</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* --- [모달 1] 일괄 시급 설정 --- */}
       {isSettingOpen && (
@@ -813,8 +977,34 @@ const styles: { [key: string]: CSSProperties } = {
   // Header
   cardHeader: { display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'16px', gap:'10px', flexWrap:'nowrap' },
   filterControls: { display:'flex', gap:'8px', flexWrap:'nowrap', width:'auto', justifyContent:'flex-end', flexShrink: 0 },
-  searchInput: { background: 'rgba(118, 118, 128, 0.24)', color: '#fff', border: 'none', borderRadius: '10px', padding: '8px 12px', fontSize: '13px', outline: 'none', width:'160px', maxWidth: '100%' },
-  sortSelect: { background: 'rgba(118, 118, 128, 0.24)', color: '#fff', border: 'none', borderRadius: '10px', padding: '8px 12px', fontSize: '13px', outline: 'none', cursor: 'pointer', minWidth: '100px', maxWidth: '100%' },
+  // 검색 칸과 정렬 셀렉트 높이를 완전히 동일하게 맞춤
+  searchInput: {
+    background: 'rgba(118, 118, 128, 0.24)',
+    color: '#fff',
+    border: 'none',
+    borderRadius: '10px',
+    padding: '8px 12px',
+    fontSize: '13px',
+    outline: 'none',
+    width: '160px',
+    maxWidth: '100%',
+    height: 34,
+    boxSizing: 'border-box',
+  },
+  sortSelect: {
+    background: 'rgba(118, 118, 128, 0.24)',
+    color: '#fff',
+    border: 'none',
+    borderRadius: '10px',
+    padding: '8px 12px',
+    fontSize: '13px',
+    outline: 'none',
+    cursor: 'pointer',
+    minWidth: '100px',
+    maxWidth: '100%',
+    height: 34,
+    boxSizing: 'border-box',
+  },
 
   // Tabs
   tabRow: { display: 'flex', gap: '8px', marginBottom: '16px', overflowX: 'auto', overflowY: 'hidden', flexWrap: 'nowrap', WebkitOverflowScrolling: 'touch', paddingBottom: '4px' },

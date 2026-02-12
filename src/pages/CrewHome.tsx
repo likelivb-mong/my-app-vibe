@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 
+import { getBranch } from '../utils/branches';
+
 // 분리된 컴포넌트 임포트
 import ManualModal from '../components/Crew/ManualModal';
 import ScheduleModal from '../components/Crew/ScheduleModal';
@@ -343,12 +345,49 @@ export default function CrewHome() {
     alert('스케줄 외 근무 승인 요청이 취소되었습니다.');
   };
 
-  const handleAttendance = (type: 'IN' | 'OUT') => {
+  const handleAttendance = async (type: 'IN' | 'OUT') => {
     const todayStr = new Date().toLocaleDateString('en-CA');
     const lockKey = `no_show_lock_${user.pin}_${todayStr}`;
     const disciplineKey = `discipline_status_${user.pin}`;
 
     if (type === 'IN') {
+      // ✅ 출근 전 네트워크(관리자 IPAM에서 설정한 지점별 허용 IP) 체크
+      const ensureAllowedNetwork = async () => {
+        const branch = getBranch(user.branchCode);
+        let allowedIp: string | undefined;
+        try {
+          const ipam = JSON.parse(localStorage.getItem('branch_allowed_ips') || '{}');
+          allowedIp = ipam[user.branchCode];
+        } catch {
+          allowedIp = undefined;
+        }
+        if (!allowedIp) allowedIp = branch?.allowedIp;
+        if (!allowedIp) return true;
+
+        try {
+          const res = await fetch('https://api64.ipify.org?format=json');
+          const data = await res.json();
+          const currentIp = data?.ip;
+          if (!currentIp) throw new Error('NO_IP');
+
+          if (currentIp !== allowedIp) {
+            alert(
+              '등록된 매장 네트워크에서만 출근 등록이 가능합니다.\n' +
+              '매장 Wi‑Fi 또는 유선 인터넷에 연결한 뒤 다시 시도해 주세요.'
+            );
+            return false;
+          }
+
+          return true;
+        } catch {
+          alert(
+            '현재 네트워크 정보를 확인할 수 없습니다.\n' +
+            '네트워크 연결을 확인한 뒤 다시 시도하거나, 관리자에게 문의해 주세요.'
+          );
+          return false;
+        }
+      };
+
       const discipline = JSON.parse(localStorage.getItem(disciplineKey) || 'null');
       if (discipline?.suspended) {
         alert('현재 징계(근무 정지) 상태입니다. 관리자에게 문의하세요.');
@@ -441,6 +480,9 @@ export default function CrewHome() {
       }
 
       const isLate = nowMinutes >= startMinutes + 1;
+
+      const networkOk = await ensureAllowedNetwork();
+      if (!networkOk) return;
 
       if (!confirm(isLate ? '지각으로 출근 등록하시겠습니까?' : '☀️ 출근 등록을 하시겠습니까?')) return;
 
@@ -667,7 +709,7 @@ export default function CrewHome() {
         <div style={overlay} onClick={() => setShowArchiveModal(false)}>
           <div style={{...modal, maxWidth:'460px', maxHeight:'85vh', display:'flex', flexDirection:'column'}} onClick={e => e.stopPropagation()}>
             <div style={{...modalHeader, borderBottom:'1px solid #F2F2F7', padding:'14px 18px'}}>
-              <h3 style={{margin:0, fontSize:16, fontWeight:700}}>🗂️ 알림 보관함</h3>
+              <h3 style={{margin:0, fontSize:16, fontWeight:700, color:'#111827'}}>🗂️ 알림 보관함</h3>
               <button onClick={() => setShowArchiveModal(false)} style={closeBtn}>×</button>
             </div>
             <div style={{flex:1, overflowY:'auto', padding:'14px 16px', background:'#F8F9FA'}}>

@@ -1,3 +1,5 @@
+import React from 'react';
+
 // ✅ 스타일을 여기서 불러오고, 아래쪽에서 다시 const statBox = ... 하지 않습니다.
 import { 
   overlay, modal, modalHeader, closeBtn, 
@@ -54,7 +56,7 @@ export default function MyInfoModal({ user, currentUser, statsMonth, setStatsMon
             <div>특별수당: ₩{currentUser.specialAllowance?.toLocaleString() || 0}</div>
             <div style={{borderTop:'1px solid #eee', marginTop:'5px', paddingTop:'5px', fontWeight:'bold', color:'#007AFF'}}>최종 시급: ₩{currentUser.totalHourly?.toLocaleString() || 0}</div>
           </div>
-          
+
           <div style={formGroup}><label style={{fontSize:'12px', color:'#1C1C1E'}}>요청 사항</label><textarea value={editRequest.reason} onChange={e => setEditRequest({...editRequest, reason: e.target.value})} style={{...textArea, color:'#000'}} /></div>
           <button onClick={onSendRequest} style={{...submitBtn, background: editRequest.reason ? '#1C1C1E' : '#C7C7CC', cursor: editRequest.reason ? 'pointer' : 'not-allowed'}} disabled={!editRequest.reason}>SEND</button>
         </div>

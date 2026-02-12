@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import AppSelect from '../common/AppSelect';
 // 공통 스타일 import
 import { 
@@ -7,8 +7,10 @@ import {
 } from '../../utils/crewStyles';
 
 const ADMIN_PHONES = ['01097243921', '01086369366'];
-const EXPENSE_CATEGORIES = ['교통비', '운영비', '기타'];
+const EXPENSE_CATEGORIES = ['교통비', '운영비', '직접 입력'];
 const TIME_REASON_OPTIONS = ['출근 선택 Miss', '퇴근 선택 Miss', '직접 입력'];
+const MAX_RECEIPT_SIZE_BYTES = 2 * 1024 * 1024; // 2MB
+const MAX_RECEIPT_SIZE_MB = 2;
 
 interface Props {
   user: any;
@@ -48,9 +50,11 @@ export default function PayStubModal({ user, initialMonth, onBack }: Props) {
       reasonType: '',
       customReason: '',
       expenseAmount: '',
-      expenseCategory: EXPENSE_CATEGORIES[0],
+      expenseCategory: '',
+      expenseCustomReason: '',
       receiptImage: ''
   });
+  const receiptInputRef = useRef<HTMLInputElement>(null);
 
   const formatTimeHM = (timeStr: string) => {
     if (!timeStr) return "00:00";
@@ -118,20 +122,39 @@ export default function PayStubModal({ user, initialMonth, onBack }: Props) {
   // 에딧 모드 변경 시 폼 초기화
   useEffect(() => {
     setSelectedLogId(null);
-    setEditForm(prev => ({ ...prev, date: '', startTime: '', endTime: '', reason: '', reasonType: '', customReason: '', expenseAmount: '', receiptImage: '' }));
+    setEditForm(prev => ({ ...prev, date: '', startTime: '', endTime: '', reason: '', reasonType: '', customReason: '', expenseAmount: '', expenseCategory: '', expenseCustomReason: '', receiptImage: '' }));
   }, [editMode]);
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => setEditForm(prev => ({ ...prev, receiptImage: reader.result as string }));
-      reader.readAsDataURL(file);
+    if (!file) return;
+    if (file.size > MAX_RECEIPT_SIZE_BYTES) {
+      alert(`영수증 사진은 최대 ${MAX_RECEIPT_SIZE_MB}MB까지 첨부 가능합니다. (선택한 파일: ${(file.size / 1024 / 1024).toFixed(1)}MB)`);
+      e.target.value = '';
+      return;
     }
+    const reader = new FileReader();
+    reader.onloadend = () => setEditForm(prev => ({ ...prev, receiptImage: reader.result as string }));
+    reader.readAsDataURL(file);
   };
 
   const handleLogClick = (log: any) => {
       if (!isEditFormOpen) return;
+      // 재클릭 시 선택 취소, 날짜/시간/사유 초기화
+      if (selectedLogId === log.id) {
+        setSelectedLogId(null);
+        setEditForm(prev => ({
+          ...prev,
+          date: '',
+          startTime: '',
+          endTime: '',
+          reasonType: '',
+          customReason: '',
+          expenseCategory: '',
+          expenseCustomReason: ''
+        }));
+        return;
+      }
       setSelectedLogId(log.id);
       setEditForm(prev => ({
           ...prev,
@@ -225,25 +248,43 @@ export default function PayStubModal({ user, initialMonth, onBack }: Props) {
                 : String(editForm.reasonType || '').trim();
               if (!finalReason) { alert("수정 사유를 선택해주세요."); return; }
               const requests = JSON.parse(localStorage.getItem('log_edit_requests') || '[]');
-              localStorage.setItem('log_edit_requests', JSON.stringify([...requests, { 
+              const nextLogRequests = [...requests, { 
                   id: Date.now(), type: 'LOG', reqPin: user.pin, reqName: user.name, branchCode: user.branchCode, 
                   logId: selectedLogId === 'active_now' ? 'ACTIVE' : selectedLogId, 
                   targetDate: editForm.date, newStartTime: editForm.startTime, newEndTime: editForm.endTime || '(중)', 
                   reason: finalReason, status: 'pending', requestDate: new Date().toLocaleString(), isRead: false 
-              }]));
+              }];
+              try {
+                localStorage.setItem('log_edit_requests', JSON.stringify(nextLogRequests));
+              } catch (e) {
+                console.error(e);
+                alert("요청을 저장하는 중 브라우저 저장 공간이 가득 찼습니다.\n요청 보관함/승인 내역을 일부 정리한 뒤 다시 시도해주세요.");
+                return;
+              }
               alert("수정 요청을 보냈습니다.");
           }
       } else {
           // 지원금 청구 로직
           if (!editForm.date) { alert("청구 날짜를 선택해주세요."); return; }
           if (!editForm.expenseAmount || Number(editForm.expenseAmount) <= 0) { alert("금액을 입력해주세요."); return; }
+          const expenseReason = editForm.expenseCategory === '직접 입력'
+            ? String(editForm.expenseCustomReason || '').trim()
+            : String(editForm.expenseCategory || '').trim();
+          if (!expenseReason) { alert("사유를 선택하거나 입력해주세요."); return; }
           const expenseRequest = {
               id: Date.now(), type: 'EXPENSE', reqPin: user.pin, reqName: user.name, branchCode: user.branchCode,
-              targetDate: editForm.date, amount: Number(editForm.expenseAmount), category: editForm.expenseCategory,
-              receiptImage: editForm.receiptImage, reason: editForm.expenseCategory, status: 'pending', requestDate: new Date().toLocaleString()
+              targetDate: editForm.date, amount: Number(editForm.expenseAmount), category: editForm.expenseCategory === '직접 입력' ? '기타' : editForm.expenseCategory,
+              receiptImage: editForm.receiptImage, reason: expenseReason, status: 'pending', requestDate: new Date().toLocaleString()
           };
           const requests = JSON.parse(localStorage.getItem('log_edit_requests') || '[]');
-          localStorage.setItem('log_edit_requests', JSON.stringify([...requests, expenseRequest]));
+          const nextRequests = [...requests, expenseRequest];
+          try {
+            localStorage.setItem('log_edit_requests', JSON.stringify(nextRequests));
+          } catch (e) {
+            console.error(e);
+            alert("요청을 저장하는 중 브라우저 저장 공간이 가득 찼습니다.\n요청 보관함/승인 내역을 일부 정리한 뒤 다시 시도해주세요.");
+            return;
+          }
           alert("지원금 청구 요청을 보냈습니다.");
       }
       setIsEditFormOpen(false);
@@ -260,11 +301,16 @@ export default function PayStubModal({ user, initialMonth, onBack }: Props) {
   const fmt = (n: number) => n?.toLocaleString();
   const compactInput: React.CSSProperties = { ...formInput, fontSize: '13px', padding: '9px 10px', marginBottom: '8px' };
   const compactSelect: React.CSSProperties = { ...formSelect, fontSize: '13px', minHeight: '38px', padding: '8px 10px', marginBottom: '8px' };
+  // 선택된 값이 있을 때 검은 배경 + 흰 글자로 표시
+  const compactSelectWithSelected: React.CSSProperties = { ...compactSelect, background: '#1c1c1e', color: '#fff', border: '1px solid #374151' };
   const isTimeReasonReady = editForm.reasonType === '직접 입력'
     ? !!String(editForm.customReason || '').trim()
     : !!String(editForm.reasonType || '').trim();
   const isTimeSubmitReady = !!selectedLogId && !!editForm.date && !!editForm.startTime && (selectedLogId === 'active_now' || !!editForm.endTime) && (isViewerAdmin || isTimeReasonReady);
-  const isExpenseSubmitReady = !!editForm.date && !!editForm.expenseCategory && Number(editForm.expenseAmount) > 0;
+  const isExpenseReasonReady = editForm.expenseCategory === '직접 입력'
+    ? !!String(editForm.expenseCustomReason || '').trim()
+    : !!String(editForm.expenseCategory || '').trim();
+  const isExpenseSubmitReady = !!editForm.date && isExpenseReasonReady && Number(editForm.expenseAmount) > 0;
   const isSubmitReady = editMode === 'TIME' ? isTimeSubmitReady : isExpenseSubmitReady;
 
   return (
@@ -354,7 +400,7 @@ export default function PayStubModal({ user, initialMonth, onBack }: Props) {
                     </div>
                     {!selectedLogId ? (
                          <div style={{...helperText, background: editMode === 'TIME' ? '#fff1f2' : '#eff6ff', color: editMode === 'TIME' ? '#e11d48' : '#1d4ed8', border: `1px solid ${editMode === 'TIME' ? '#fecdd3' : '#bfdbfe'}`}}>
-                            {editMode === 'TIME' ? '⚠️ 시간 수정은 아래 리스트에서 대상을 선택하세요.' : '지원금 청구할 날짜를 아래 리스트에서 선택하세요.'}
+                            {editMode === 'TIME' ? '⚠️ 수정하려는 근무 기록을 하단에서 선택하세요.' : '⚠️ 청구할 날짜의 근무 기록을 하단에서 선택하세요.'}
                          </div>
                     ) : <div style={helperText}>✅ {editForm.date} 기록이 선택되었습니다.</div>}
                     
@@ -362,22 +408,64 @@ export default function PayStubModal({ user, initialMonth, onBack }: Props) {
                         <input
                           type="date"
                           value={editForm.date}
-                          onChange={e => setEditForm({...editForm, date: e.target.value})}
-                          onKeyDown={e => e.preventDefault()}
-                          style={compactInput}
+                          disabled
+                          readOnly
+                          style={{ ...compactInput, cursor: 'not-allowed', opacity: 0.9 }}
+                          title="날짜는 하단 일일 기록 칸에서만 선택할 수 있습니다."
                         />
                         {editMode === 'EXPENSE' ? (
                             <>
-                                <div style={{display:'flex', gap:'10px', marginBottom:'10px'}}>
+                                <div style={{marginBottom:'10px'}}>
                                     <AppSelect
                                       value={editForm.expenseCategory}
-                                      onChange={(value) => setEditForm({ ...editForm, expenseCategory: value })}
-                                      style={compactSelect}
-                                      options={EXPENSE_CATEGORIES.map((c) => ({ value: c, label: c }))}
+                                      onChange={(value) => setEditForm({ ...editForm, expenseCategory: value, expenseCustomReason: value === '직접 입력' ? editForm.expenseCustomReason : '' })}
+                                      style={editForm.expenseCategory ? compactSelectWithSelected : compactSelect}
+                                      options={[
+                                        { value: '', label: '사유 선택하기', disabled: true },
+                                        ...EXPENSE_CATEGORIES.map((c) => ({ value: c, label: c })),
+                                      ]}
                                     />
-                                    <input type="number" placeholder="금액(₩)" value={editForm.expenseAmount} onChange={e => setEditForm({...editForm, expenseAmount: e.target.value})} style={compactInput} />
+                                    {editForm.expenseCategory === '직접 입력' && (
+                                      <input
+                                        type="text"
+                                        placeholder="사유를 직접 입력하세요"
+                                        value={editForm.expenseCustomReason}
+                                        onChange={e => setEditForm({ ...editForm, expenseCustomReason: e.target.value })}
+                                        style={compactInput}
+                                      />
+                                    )}
                                 </div>
-                                <input type="file" accept="image/*" onChange={handleImageChange} style={compactInput} />
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+                                    <span style={{ fontSize: '15px', fontWeight: '700', color: '#475569', flexShrink: 0 }}>₩</span>
+                                    <input type="number" placeholder="금액" value={editForm.expenseAmount} onChange={e => setEditForm({...editForm, expenseAmount: e.target.value})} style={{ ...compactInput, marginBottom: 0, flex: 1 }} />
+                                </div>
+                                <input
+                                  ref={receiptInputRef}
+                                  id="paystub-receipt-upload"
+                                  type="file"
+                                  accept="image/*"
+                                  onChange={handleImageChange}
+                                  style={{ position: 'absolute', width: 1, height: 1, opacity: 0, overflow: 'hidden', clip: 'rect(0,0,0,0)', pointerEvents: 'none' }}
+                                  aria-label="영수증 사진 첨부"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => receiptInputRef.current?.click()}
+                                  style={{
+                                    ...compactInput,
+                                    cursor: 'pointer',
+                                    marginBottom: '8px',
+                                    background: '#fff',
+                                    border: '1px solid #E5E5EA',
+                                    color: '#475569',
+                                    fontWeight: '600',
+                                  }}
+                                >
+                                  {editForm.receiptImage ? '✓ 영수증 첨부됨 (다시 선택)' : '📷 영수증 사진 선택'}
+                                </button>
+                                <p style={{ fontSize: '11px', color: '#64748b', margin: '-4px 0 8px 0' }}>
+                                  증빙을 위해 영수증 사진을 반드시 첨부해주세요.
+                                </p>
                             </>
                         ) : (
                             <div style={{display:'flex', gap:'10px', marginBottom:'10px'}}>
@@ -390,7 +478,7 @@ export default function PayStubModal({ user, initialMonth, onBack }: Props) {
                             <AppSelect
                               value={editForm.reasonType}
                               onChange={(value) => setEditForm({ ...editForm, reasonType: value, customReason: value === '직접 입력' ? editForm.customReason : '' })}
-                              style={compactSelect}
+                              style={editForm.reasonType ? compactSelectWithSelected : compactSelect}
                               options={[
                                 { value: '', label: '사유 선택하기', disabled: true },
                                 ...TIME_REASON_OPTIONS.map((reason) => ({ value: reason, label: reason })),
@@ -407,7 +495,14 @@ export default function PayStubModal({ user, initialMonth, onBack }: Props) {
                             )}
                           </>
                         ) : null}
-                        <button onClick={handleSubmitEdit} disabled={!isSubmitReady} style={{...sendBtn, background: isSubmitReady ? '#3b82f6' : '#cbd5e1'}}>승인 요청</button>
+                        <button
+                          onClick={handleSubmitEdit}
+                          type="button"
+                          disabled={editMode === 'TIME' ? !isSubmitReady : false}
+                          style={{...sendBtn, background: (editMode === 'TIME' ? isSubmitReady : true) ? '#3b82f6' : '#cbd5e1', cursor: editMode === 'EXPENSE' ? 'pointer' : undefined}}
+                        >
+                          승인 요청
+                        </button>
                     </div>
                 </div>
             )}

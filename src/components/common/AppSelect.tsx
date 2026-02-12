@@ -20,14 +20,14 @@ type Props = {
 
 const baseTriggerStyle: React.CSSProperties = {
   width: "100%",
-  minHeight: "44px",
-  borderRadius: "8px",
-  border: "1px solid #444",
-  background: "#1a1a1a",
+  minHeight: "34px", // 검색 input 높이에 맞춤
+  borderRadius: "10px",
+  border: "none",
+  background: "rgba(118, 118, 128, 0.24)",
   color: "#fff",
   boxSizing: "border-box",
-  padding: "12px 14px",
-  fontSize: "18px",
+  padding: "8px 12px",
+  fontSize: "13px",
   display: "flex",
   alignItems: "center",
   justifyContent: "space-between",
@@ -54,10 +54,10 @@ const baseOptionStyle: React.CSSProperties = {
   border: "none",
   color: "#fff",
   textAlign: "left",
-  padding: "10px 12px",
-  fontSize: "18px",
+  padding: "8px 12px",
+  fontSize: "13px",      // CrewManager 검색 input과 동일 크기
   cursor: "pointer",
-  minHeight: "42px",
+  minHeight: "32px",
 };
 
 export default function AppSelect({

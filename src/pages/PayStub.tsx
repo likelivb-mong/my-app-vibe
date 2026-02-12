@@ -145,16 +145,16 @@ const PayStub = ({ user }: any) => {
   const grandTotalPay = useMemo(() => {
     let total = 0;
     crews.forEach(crew => {
-       const hasLog = logs.some(l => l.userPin === crew.pin && l.type === 'OUT' && l.date.startsWith(targetMonth));
-       const allApproved = JSON.parse(localStorage.getItem('approved_expenses') || '[]');
-       const crewPin = String(crew.pin ?? '');
-       const hasExp = allApproved.some((ex: any) => {
-         const exPin = String(ex.userPin ?? ex.reqPin ?? '');
-         const exDate = String(ex.date || ex.targetDate || '');
-         return exPin === crewPin && exDate.startsWith(targetMonth);
-       });
-       const isActive = isCrewActiveInMonth(crew);
-       if (hasLog || hasExp || isActive) total += calculatePaySummary(crew).net;
+      const hasLog = logs.some(l => l.userPin === crew.pin && l.type === 'OUT' && l.date.startsWith(targetMonth));
+      const allApproved = JSON.parse(localStorage.getItem('approved_expenses') || '[]');
+      const crewPin = String(crew.pin ?? '');
+      const hasExp = allApproved.some((ex: any) => {
+        const exPin = String(ex.userPin ?? ex.reqPin ?? '');
+        const exDate = String(ex.date || ex.targetDate || '');
+        return exPin === crewPin && exDate.startsWith(targetMonth);
+      });
+      const isActive = isCrewActiveInMonth(crew);
+      if (hasLog || hasExp || isActive) total += calculatePaySummary(crew).net;
     });
     return total;
   }, [crews, logs, targetMonth, holidaysMap, payRefreshTick]);
