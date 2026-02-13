@@ -997,3 +997,4 @@ const excelTimeCell: React.CSSProperties = { height: '30px', borderBottom: '1px 
 
 const deleteOptionCard: React.CSSProperties = { padding: '12px 14px', borderRadius: '12px', border: '2px solid', cursor: 'pointer', transition: '0.2s' };
 const appleBtnBase: React.CSSProperties = { border: 'none', borderRadius: '10px', padding: '12px', color: '#fff', fontSize: '14px', fontWeight: '600', cursor: 'pointer' };
+const appleBtnBase: React.CSSProperties = { border: 'none', borderRadius: '10px', padding: '12px', color: '#fff', fontSize: '14px', fontWeight: '600', cursor: 'pointer' };
